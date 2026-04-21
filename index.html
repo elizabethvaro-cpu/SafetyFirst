@@ -9,123 +9,180 @@
   <body>
     <div class="app-shell">
       <header class="app-header">
-        <p class="eyebrow" data-i18n="appTagline">Community Safety</p>
-        <h1 id="page-title">Safety Map</h1>
+        <div>
+          <p class="eyebrow" data-i18n="appTagline">Smart Urban Safety</p>
+          <h1 id="page-title">Safety Map</h1>
+        </div>
+        <button class="ghost-btn" data-action="alerts-center" aria-label="alerts">
+          3
+        </button>
       </header>
 
       <main class="page-container">
         <section class="page active" id="page-map" data-page="map">
-          <img class="hero-image" src="Map.png" alt="Map reference screen" />
-          <div class="card">
-            <h2 data-i18n="currentLocation">Current Location</h2>
-            <p data-i18n="currentLocationValue">
-              5th Ave & Main St, Downtown
-            </p>
+          <div class="map-frame">
+            <div class="map-overlay top">
+              <span class="pill" data-i18n="riskLevel">Risk: Medium</span>
+              <button class="small-btn" data-action="share-location" data-i18n="share">
+                Share
+              </button>
+            </div>
+            <div class="map-pin user" title="you"></div>
+            <div class="map-pin high one" title="danger high"></div>
+            <div class="map-pin medium two" title="danger medium"></div>
+            <div class="map-pin safe three" title="safe zone"></div>
+            <div class="map-overlay bottom">
+              <strong data-i18n="currentLocation">5th Ave & Main St</strong>
+              <small data-i18n="mapOverlayDetail">2 alerts within 1km radius</small>
+            </div>
           </div>
-          <div class="card">
-            <h2 data-i18n="nearbyAlerts">Nearby Alerts</h2>
-            <ul class="danger-list">
+
+          <div class="stat-row">
+            <article class="stat-card">
+              <h3 data-i18n="incidentsToday">11</h3>
+              <p data-i18n="incidentsTodayLabel">Incidents today</p>
+            </article>
+            <article class="stat-card">
+              <h3 data-i18n="safeZones">6</h3>
+              <p data-i18n="safeZonesLabel">Safe zones nearby</p>
+            </article>
+            <article class="stat-card">
+              <h3 data-i18n="patrolUnits">4</h3>
+              <p data-i18n="patrolUnitsLabel">Patrol units active</p>
+            </article>
+          </div>
+
+          <section class="card">
+            <div class="card-head">
+              <h2 data-i18n="nearbyAlerts">Nearby Alerts</h2>
+              <button class="link-btn" data-i18n="viewAll">View all</button>
+            </div>
+            <ul class="timeline">
               <li>
                 <span class="danger-tag high" data-i18n="highRisk">High</span>
-                <p data-i18n="alertOne">
-                  Theft reported 300m away, 14 minutes ago.
-                </p>
+                <div>
+                  <p data-i18n="alertOne">Theft reported near City Mall.</p>
+                  <small data-i18n="alertOneMeta">300m away • 14 min ago</small>
+                </div>
               </li>
               <li>
-                <span class="danger-tag medium" data-i18n="mediumRisk"
-                  >Medium</span
-                >
-                <p data-i18n="alertTwo">
-                  Road accident near Oak Junction, 1.2km away.
-                </p>
+                <span class="danger-tag medium" data-i18n="mediumRisk">Medium</span>
+                <div>
+                  <p data-i18n="alertTwo">Road accident near Oak Junction.</p>
+                  <small data-i18n="alertTwoMeta">1.2km away • 38 min ago</small>
+                </div>
               </li>
             </ul>
-          </div>
-          <button class="primary-btn" data-action="share-location">
-            <span data-i18n="shareMyLocation">Share My Live Location</span>
-          </button>
+          </section>
         </section>
 
         <section class="page" id="page-report" data-page="report">
-          <img class="hero-image" src="Report.png" alt="Report reference screen" />
-          <form id="report-form" class="card form-card">
+          <section class="card form-card">
             <h2 data-i18n="reportIncident">Report an Incident</h2>
-            <label for="report-type" data-i18n="incidentType">Incident Type</label>
-            <select id="report-type" required>
-              <option value="" data-i18n="selectType">Select type...</option>
-              <option value="crime" data-i18n="crime">Crime</option>
-              <option value="accident" data-i18n="accident">Accident</option>
-              <option value="harassment" data-i18n="harassment">
+            <p class="subtle" data-i18n="reportHint">
+              Your report helps route people away from danger in real time.
+            </p>
+
+            <div class="chip-row" id="incident-chip-row">
+              <button type="button" class="chip active" data-type="crime" data-i18n="crime">
+                Crime
+              </button>
+              <button type="button" class="chip" data-type="accident" data-i18n="accident">
+                Accident
+              </button>
+              <button
+                type="button"
+                class="chip"
+                data-type="harassment"
+                data-i18n="harassment"
+              >
                 Harassment
-              </option>
-            </select>
+              </button>
+              <button type="button" class="chip" data-type="other" data-i18n="other">
+                Other
+              </button>
+            </div>
 
-            <label for="report-location" data-i18n="incidentLocation"
-              >Location</label
-            >
-            <input
-              id="report-location"
-              type="text"
-              placeholder="Street / Area"
-              required
-            />
+            <form id="report-form" class="stack">
+              <label for="report-location" data-i18n="incidentLocation">Location</label>
+              <input id="report-location" type="text" placeholder="Street / Area" required />
 
-            <label for="report-details" data-i18n="details">Details</label>
-            <textarea
-              id="report-details"
-              rows="4"
-              placeholder="Tell us what happened..."
-              required
-            ></textarea>
+              <label for="report-details" data-i18n="details">Details</label>
+              <textarea
+                id="report-details"
+                rows="4"
+                placeholder="Tell us what happened..."
+                required
+              ></textarea>
 
-            <label class="switch-row" for="report-anonymous">
-              <span data-i18n="anonymousReport">Submit anonymously</span>
-              <input id="report-anonymous" type="checkbox" />
-            </label>
+              <label class="switch-row" for="report-anonymous">
+                <span data-i18n="anonymousReport">Submit anonymously</span>
+                <input id="report-anonymous" type="checkbox" />
+              </label>
 
-            <button class="primary-btn" type="submit">
-              <span data-i18n="submitReport">Submit Report</span>
-            </button>
-          </form>
+              <button class="soft-btn" type="button" data-action="upload-proof" data-i18n="uploadProof">
+                Attach photo or video
+              </button>
+
+              <button class="primary-btn" type="submit">
+                <span data-i18n="submitReport">Submit Report</span>
+              </button>
+            </form>
+          </section>
         </section>
 
         <section class="page" id="page-sos" data-page="sos">
-          <img class="hero-image" src="SOS.png" alt="SOS reference screen" />
-          <div class="card">
+          <section class="sos-hero">
+            <p data-i18n="sosStatus">Emergency mode ready</p>
+            <button class="sos-ring" data-action="broadcast-sos">
+              <span>SOS</span>
+            </button>
+            <small data-i18n="sosDescription">Tap and hold for 2 seconds to alert contacts.</small>
+          </section>
+
+          <section class="card">
             <h2 data-i18n="sosQuickCall">Emergency Quick Call</h2>
-            <p data-i18n="sosDescription">
-              Tap one of the emergency contacts below to call instantly.
-            </p>
             <div class="sos-grid">
-              <a class="sos-btn" href="tel:911">Police (911)</a>
-              <a class="sos-btn" href="tel:112">Ambulance (112)</a>
-              <a class="sos-btn" href="tel:101">Fire (101)</a>
-              <a class="sos-btn" href="tel:1098">Helpline (1098)</a>
+              <a class="sos-btn" href="tel:911" data-i18n="police">Police 911</a>
+              <a class="sos-btn" href="tel:112" data-i18n="ambulance">Ambulance 112</a>
+              <a class="sos-btn" href="tel:101" data-i18n="fire">Fire 101</a>
+              <a class="sos-btn" href="tel:1098" data-i18n="helpline">Helpline 1098</a>
             </div>
-          </div>
-          <button class="danger-btn" data-action="broadcast-sos">
-            <span data-i18n="broadcastSos">Broadcast SOS to Trusted Contacts</span>
-          </button>
+          </section>
+
+          <section class="card stack">
+            <h2 data-i18n="trustedContacts">Trusted Contacts</h2>
+            <div class="contact-row">
+              <strong>Alex Johnson</strong>
+              <small>+1 555 1042</small>
+            </div>
+            <div class="contact-row">
+              <strong>Rina Patel</strong>
+              <small>+1 555 8892</small>
+            </div>
+            <button class="danger-btn" data-action="silent-sos" data-i18n="silentSos">
+              Send Silent SOS
+            </button>
+          </section>
         </section>
 
         <section class="page" id="page-gps" data-page="gps">
-          <img
-            class="hero-image"
-            src="GPS safety.png"
-            alt="GPS safety reference screen"
-          />
+          <section class="route-map card">
+            <div class="route-dot start"></div>
+            <div class="route-dot end"></div>
+            <div class="route-line"></div>
+            <div class="route-badge start" data-i18n="fromShort">From</div>
+            <div class="route-badge end" data-i18n="toShort">To</div>
+          </section>
+
           <form class="card form-card" id="route-form">
             <h2 data-i18n="safeRouting">Safe Route Planner</h2>
+
             <label for="origin" data-i18n="fromLocation">From</label>
             <input id="origin" type="text" placeholder="Your starting point" required />
 
             <label for="destination" data-i18n="toLocation">To</label>
-            <input
-              id="destination"
-              type="text"
-              placeholder="Destination"
-              required
-            />
+            <input id="destination" type="text" placeholder="Destination" required />
 
             <fieldset>
               <legend data-i18n="routePriority">Route Priority</legend>
@@ -139,23 +196,34 @@
                 ><input type="checkbox" /> <span data-i18n="avoidTraffic">Avoid heavy traffic</span></label
               >
             </fieldset>
+
+            <div class="route-options" id="route-options">
+              <button type="button" class="route-option active">
+                <strong data-i18n="routeOptionOne">Route A</strong>
+                <small data-i18n="routeOptionOneMeta">14 min • Low risk</small>
+              </button>
+              <button type="button" class="route-option">
+                <strong data-i18n="routeOptionTwo">Route B</strong>
+                <small data-i18n="routeOptionTwoMeta">11 min • Medium risk</small>
+              </button>
+            </div>
+
             <button class="primary-btn" type="submit">
               <span data-i18n="findSafeRoute">Find Safest Route</span>
             </button>
           </form>
-          <div class="card route-result">
-            <h3 data-i18n="recommendedRoute">Recommended Route</h3>
-            <p data-i18n="routeSummary">Estimated 14 min, low risk corridor.</p>
-          </div>
         </section>
 
         <section class="page" id="page-settings" data-page="settings">
-          <img
-            class="hero-image"
-            src="Settings.png"
-            alt="Settings reference screen"
-          />
-          <div class="card form-card">
+          <section class="card profile-card">
+            <div>
+              <h2>Elizabeth V.</h2>
+              <p data-i18n="profileTagline">Safety mode: Aware commuter</p>
+            </div>
+            <button class="soft-btn" data-i18n="editProfile">Edit profile</button>
+          </section>
+
+          <section class="card form-card">
             <h2 data-i18n="preferences">Preferences</h2>
 
             <label for="theme-select" data-i18n="appearance">Appearance</label>
@@ -180,25 +248,42 @@
               <span data-i18n="locationSharing">Auto location sharing</span>
               <input id="location-sharing" type="checkbox" />
             </label>
-          </div>
+          </section>
+
+          <section class="card stack">
+            <h2 data-i18n="emergencyPreferences">Emergency Preferences</h2>
+            <label class="switch-row" for="auto-siren">
+              <span data-i18n="autoSiren">Auto siren after SOS</span>
+              <input id="auto-siren" type="checkbox" />
+            </label>
+            <label class="switch-row" for="share-route">
+              <span data-i18n="shareRoute">Share active route with contacts</span>
+              <input id="share-route" type="checkbox" checked />
+            </label>
+          </section>
         </section>
       </main>
 
       <nav class="bottom-nav">
-        <button class="nav-item active" data-target="map" data-i18n="mapTab">
-          Map
+        <button class="nav-item active" data-target="map">
+          <span class="nav-icon">MP</span>
+          <span data-i18n="mapTab">Map</span>
         </button>
-        <button class="nav-item" data-target="report" data-i18n="reportTab">
-          Report
+        <button class="nav-item" data-target="report">
+          <span class="nav-icon">RP</span>
+          <span data-i18n="reportTab">Report</span>
         </button>
-        <button class="nav-item" data-target="sos" data-i18n="sosTab">SOS</button>
-        <button class="nav-item" data-target="gps" data-i18n="gpsTab">GPS</button>
-        <button
-          class="nav-item"
-          data-target="settings"
-          data-i18n="settingsTab"
-        >
-          Settings
+        <button class="nav-item" data-target="sos">
+          <span class="nav-icon">SO</span>
+          <span data-i18n="sosTab">SOS</span>
+        </button>
+        <button class="nav-item" data-target="gps">
+          <span class="nav-icon">GP</span>
+          <span data-i18n="gpsTab">GPS</span>
+        </button>
+        <button class="nav-item" data-target="settings">
+          <span class="nav-icon">ST</span>
+          <span data-i18n="settingsTab">Settings</span>
         </button>
       </nav>
     </div>
