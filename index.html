@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SafeSteps - Navigate Safely</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="app-header">
+        <p class="eyebrow" data-i18n="appTagline">Community Safety</p>
+        <h1 id="page-title">Safety Map</h1>
+      </header>
+
+      <main class="page-container">
+        <section class="page active" id="page-map" data-page="map">
+          <img class="hero-image" src="Map.png" alt="Map reference screen" />
+          <div class="card">
+            <h2 data-i18n="currentLocation">Current Location</h2>
+            <p data-i18n="currentLocationValue">
+              5th Ave & Main St, Downtown
+            </p>
+          </div>
+          <div class="card">
+            <h2 data-i18n="nearbyAlerts">Nearby Alerts</h2>
+            <ul class="danger-list">
+              <li>
+                <span class="danger-tag high" data-i18n="highRisk">High</span>
+                <p data-i18n="alertOne">
+                  Theft reported 300m away, 14 minutes ago.
+                </p>
+              </li>
+              <li>
+                <span class="danger-tag medium" data-i18n="mediumRisk"
+                  >Medium</span
+                >
+                <p data-i18n="alertTwo">
+                  Road accident near Oak Junction, 1.2km away.
+                </p>
+              </li>
+            </ul>
+          </div>
+          <button class="primary-btn" data-action="share-location">
+            <span data-i18n="shareMyLocation">Share My Live Location</span>
+          </button>
+        </section>
+
+        <section class="page" id="page-report" data-page="report">
+          <img class="hero-image" src="Report.png" alt="Report reference screen" />
+          <form id="report-form" class="card form-card">
+            <h2 data-i18n="reportIncident">Report an Incident</h2>
+            <label for="report-type" data-i18n="incidentType">Incident Type</label>
+            <select id="report-type" required>
+              <option value="" data-i18n="selectType">Select type...</option>
+              <option value="crime" data-i18n="crime">Crime</option>
+              <option value="accident" data-i18n="accident">Accident</option>
+              <option value="harassment" data-i18n="harassment">
+                Harassment
+              </option>
+            </select>
+
+            <label for="report-location" data-i18n="incidentLocation"
+              >Location</label
+            >
+            <input
+              id="report-location"
+              type="text"
+              placeholder="Street / Area"
+              required
+            />
+
+            <label for="report-details" data-i18n="details">Details</label>
+            <textarea
+              id="report-details"
+              rows="4"
+              placeholder="Tell us what happened..."
+              required
+            ></textarea>
+
+            <label class="switch-row" for="report-anonymous">
+              <span data-i18n="anonymousReport">Submit anonymously</span>
+              <input id="report-anonymous" type="checkbox" />
+            </label>
+
+            <button class="primary-btn" type="submit">
+              <span data-i18n="submitReport">Submit Report</span>
+            </button>
+          </form>
+        </section>
+
+        <section class="page" id="page-sos" data-page="sos">
+          <img class="hero-image" src="SOS.png" alt="SOS reference screen" />
+          <div class="card">
+            <h2 data-i18n="sosQuickCall">Emergency Quick Call</h2>
+            <p data-i18n="sosDescription">
+              Tap one of the emergency contacts below to call instantly.
+            </p>
+            <div class="sos-grid">
+              <a class="sos-btn" href="tel:911">Police (911)</a>
+              <a class="sos-btn" href="tel:112">Ambulance (112)</a>
+              <a class="sos-btn" href="tel:101">Fire (101)</a>
+              <a class="sos-btn" href="tel:1098">Helpline (1098)</a>
+            </div>
+          </div>
+          <button class="danger-btn" data-action="broadcast-sos">
+            <span data-i18n="broadcastSos">Broadcast SOS to Trusted Contacts</span>
+          </button>
+        </section>
+
+        <section class="page" id="page-gps" data-page="gps">
+          <img
+            class="hero-image"
+            src="GPS safety.png"
+            alt="GPS safety reference screen"
+          />
+          <form class="card form-card" id="route-form">
+            <h2 data-i18n="safeRouting">Safe Route Planner</h2>
+            <label for="origin" data-i18n="fromLocation">From</label>
+            <input id="origin" type="text" placeholder="Your starting point" required />
+
+            <label for="destination" data-i18n="toLocation">To</label>
+            <input
+              id="destination"
+              type="text"
+              placeholder="Destination"
+              required
+            />
+
+            <fieldset>
+              <legend data-i18n="routePriority">Route Priority</legend>
+              <label class="check-row"
+                ><input type="checkbox" checked /> <span data-i18n="wellLitRoads">Well-lit roads</span></label
+              >
+              <label class="check-row"
+                ><input type="checkbox" checked /> <span data-i18n="avoidIsolated">Avoid isolated streets</span></label
+              >
+              <label class="check-row"
+                ><input type="checkbox" /> <span data-i18n="avoidTraffic">Avoid heavy traffic</span></label
+              >
+            </fieldset>
+            <button class="primary-btn" type="submit">
+              <span data-i18n="findSafeRoute">Find Safest Route</span>
+            </button>
+          </form>
+          <div class="card route-result">
+            <h3 data-i18n="recommendedRoute">Recommended Route</h3>
+            <p data-i18n="routeSummary">Estimated 14 min, low risk corridor.</p>
+          </div>
+        </section>
+
+        <section class="page" id="page-settings" data-page="settings">
+          <img
+            class="hero-image"
+            src="Settings.png"
+            alt="Settings reference screen"
+          />
+          <div class="card form-card">
+            <h2 data-i18n="preferences">Preferences</h2>
+
+            <label for="theme-select" data-i18n="appearance">Appearance</label>
+            <select id="theme-select">
+              <option value="light" data-i18n="lightMode">Light Mode</option>
+              <option value="dark" data-i18n="darkMode">Dark Mode</option>
+            </select>
+
+            <label for="language-select" data-i18n="language">Language</label>
+            <select id="language-select">
+              <option value="en">English</option>
+              <option value="es">Espanol</option>
+              <option value="fr">Francais</option>
+            </select>
+
+            <label class="switch-row" for="push-alerts">
+              <span data-i18n="pushAlerts">Push danger alerts</span>
+              <input id="push-alerts" type="checkbox" checked />
+            </label>
+
+            <label class="switch-row" for="location-sharing">
+              <span data-i18n="locationSharing">Auto location sharing</span>
+              <input id="location-sharing" type="checkbox" />
+            </label>
+          </div>
+        </section>
+      </main>
+
+      <nav class="bottom-nav">
+        <button class="nav-item active" data-target="map" data-i18n="mapTab">
+          Map
+        </button>
+        <button class="nav-item" data-target="report" data-i18n="reportTab">
+          Report
+        </button>
+        <button class="nav-item" data-target="sos" data-i18n="sosTab">SOS</button>
+        <button class="nav-item" data-target="gps" data-i18n="gpsTab">GPS</button>
+        <button
+          class="nav-item"
+          data-target="settings"
+          data-i18n="settingsTab"
+        >
+          Settings
+        </button>
+      </nav>
+    </div>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <script src="script.js"></script>
+  </body>
+</html>
