@@ -123,6 +123,10 @@ h3 {
   gap: 0.75rem;
 }
 
+.hidden {
+  display: none;
+}
+
 .empty-state {
   border: 1px dashed var(--line);
   border-radius: 0.75rem;
@@ -571,6 +575,16 @@ fieldset {
 
 .profile-card h2 {
   margin-bottom: 0.25rem;
+}
+
+.profile-actions {
+  display: flex;
+  gap: 0.55rem;
+  justify-content: flex-end;
+}
+
+.profile-actions button {
+  flex: 1;
 }
 
 .bottom-nav {

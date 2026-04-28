@@ -22,6 +22,12 @@ const safeZonesCount = document.getElementById("safe-zones-count");
 const patrolUnitsCount = document.getElementById("patrol-units-count");
 const riskPill = document.querySelector(".pill");
 const alertsBadge = document.querySelector("[data-action='alerts-center']");
+const profileDisplayName = document.getElementById("profile-display-name");
+const editProfileBtn = document.getElementById("edit-profile-btn");
+const profileEditorCard = document.getElementById("profile-editor-card");
+const profileForm = document.getElementById("profile-form");
+const profileNameInput = document.getElementById("profile-name-input");
+const cancelProfileEditBtn = document.getElementById("cancel-profile-edit");
 
 const labels = {
   map: "Safety Map",
@@ -33,6 +39,7 @@ const labels = {
 
 const state = {
   currentUserId: null,
+  currentProfileName: "Community Member",
   selectedIncidentType: "crime",
   selectedRouteKey: "A",
   incidents: [],
@@ -107,6 +114,8 @@ const copy = {
     preferences: "Preferences",
     profileTagline: "Safety mode: Aware commuter",
     editProfile: "Edit profile",
+    profileEditorTitle: "Edit Profile",
+    displayNameLabel: "Display name",
     appearance: "Appearance",
     lightMode: "Light Mode",
     darkMode: "Dark Mode",
@@ -135,6 +144,10 @@ const copy = {
     routeSaved: "Route saved to history.",
     routeDeleted: "Route deleted.",
     routeUpdated: "Route updated.",
+    profileSaved: "Profile name updated.",
+    profileNameRequired: "Please enter a display name.",
+    profileSchemaMissing:
+      "Profile table is missing. Run the latest SQL schema in Supabase.",
   },
   es: {
     mapTitle: "Mapa de Seguridad",
@@ -201,6 +214,8 @@ const copy = {
     preferences: "Preferencias",
     profileTagline: "Modo seguridad: viajero atento",
     editProfile: "Editar perfil",
+    profileEditorTitle: "Editar perfil",
+    displayNameLabel: "Nombre visible",
     appearance: "Apariencia",
     lightMode: "Modo claro",
     darkMode: "Modo oscuro",
@@ -229,6 +244,10 @@ const copy = {
     routeSaved: "Ruta guardada.",
     routeDeleted: "Ruta eliminada.",
     routeUpdated: "Ruta actualizada.",
+    profileSaved: "Nombre de perfil actualizado.",
+    profileNameRequired: "Ingresa un nombre visible.",
+    profileSchemaMissing:
+      "Falta la tabla de perfil. Ejecuta el SQL mas reciente en Supabase.",
   },
   fr: {
     mapTitle: "Carte de Securite",
@@ -295,6 +314,8 @@ const copy = {
     preferences: "Preferences",
     profileTagline: "Mode securite : navetteur vigilant",
     editProfile: "Modifier profil",
+    profileEditorTitle: "Modifier le profil",
+    displayNameLabel: "Nom affiche",
     appearance: "Apparence",
     lightMode: "Mode clair",
     darkMode: "Mode sombre",
@@ -323,6 +344,10 @@ const copy = {
     routeSaved: "Itineraire enregistre.",
     routeDeleted: "Itineraire supprime.",
     routeUpdated: "Itineraire mis a jour.",
+    profileSaved: "Nom du profil mis a jour.",
+    profileNameRequired: "Veuillez saisir un nom affiche.",
+    profileSchemaMissing:
+      "La table de profil est absente. Executez le SQL le plus recent dans Supabase.",
   },
 };
 
@@ -656,6 +681,82 @@ async function logSosEvent(triggerType) {
   await fetchLastSosEvent();
 }
 
+function setProfileDisplayName(name) {
+  const fallback = "Community Member";
+  const trimmed = (name || "").trim();
+  state.currentProfileName = trimmed || fallback;
+  if (profileDisplayName) {
+    profileDisplayName.textContent = state.currentProfileName;
+  }
+  if (profileNameInput && !profileNameInput.value) {
+    profileNameInput.value = state.currentProfileName;
+  }
+}
+
+function showProfileEditor() {
+  if (!profileEditorCard || !profileNameInput) return;
+  profileNameInput.value = state.currentProfileName;
+  profileEditorCard.classList.remove("hidden");
+  profileNameInput.focus();
+}
+
+function hideProfileEditor() {
+  if (!profileEditorCard) return;
+  profileEditorCard.classList.add("hidden");
+}
+
+async function loadUserProfile() {
+  if (!supabase || !state.currentUserId) return;
+  const { data, error } = await supabase
+    .from("user_profiles")
+    .select("display_name")
+    .eq("user_id", state.currentUserId)
+    .maybeSingle();
+
+  if (error && error.code !== "PGRST116") {
+    if (error.code === "42P01") {
+      showToast(text("profileSchemaMissing"));
+      return;
+    }
+    showToast(error.message);
+    return;
+  }
+
+  setProfileDisplayName(data?.display_name || state.currentProfileName);
+}
+
+async function saveUserProfileName(name) {
+  if (!supabase || !state.currentUserId) return false;
+  const trimmedName = (name || "").trim();
+  if (!trimmedName) {
+    showToast(text("profileNameRequired"));
+    return false;
+  }
+
+  const payload = {
+    user_id: state.currentUserId,
+    display_name: trimmedName,
+    updated_at: new Date().toISOString(),
+  };
+
+  const { error } = await supabase.from("user_profiles").upsert(payload, {
+    onConflict: "user_id",
+  });
+
+  if (error) {
+    if (error.code === "42P01") {
+      showToast(text("profileSchemaMissing"));
+      return false;
+    }
+    showToast(error.message);
+    return false;
+  }
+
+  setProfileDisplayName(trimmedName);
+  showToast(text("profileSaved"));
+  return true;
+}
+
 navItems.forEach((item) => {
   item.addEventListener("click", () => switchPage(item.dataset.target));
 });
@@ -774,6 +875,31 @@ document
 document.getElementById("refresh-my-reports").addEventListener("click", fetchMyReports);
 document.getElementById("refresh-routes").addEventListener("click", fetchRouteHistory);
 document.getElementById("save-preferences-btn").addEventListener("click", savePreferences);
+
+if (editProfileBtn) {
+  editProfileBtn.addEventListener("click", () => {
+    showProfileEditor();
+  });
+}
+
+if (cancelProfileEditBtn) {
+  cancelProfileEditBtn.addEventListener("click", () => {
+    hideProfileEditor();
+  });
+}
+
+if (profileForm) {
+  profileForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (!hasDatabaseSession()) {
+      return;
+    }
+    const wasSaved = await saveUserProfileName(profileNameInput.value);
+    if (wasSaved) {
+      hideProfileEditor();
+    }
+  });
+}
 
 myReportsList.addEventListener("click", async (event) => {
   const target = event.target;
@@ -921,6 +1047,7 @@ languageSelect.addEventListener("change", () => {
 
 async function initApp() {
   applyLanguage("en");
+  setProfileDisplayName(state.currentProfileName);
   if (!isSupabaseConfigured) {
     renderIncidentFeed();
     renderMyReports();
@@ -945,6 +1072,7 @@ async function initApp() {
 
   await Promise.all([
     loadPreferences(),
+    loadUserProfile(),
     fetchIncidentFeed(),
     fetchMyReports(),
     fetchTrustedContacts(),

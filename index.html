@@ -225,10 +225,34 @@
         <section class="page" id="page-settings" data-page="settings">
           <section class="card profile-card">
             <div>
-              <h2>Elizabeth V.</h2>
+              <h2 id="profile-display-name">Community Member</h2>
               <p data-i18n="profileTagline">Safety mode: Aware commuter</p>
             </div>
-            <button class="soft-btn" data-i18n="editProfile">Edit profile</button>
+            <button class="soft-btn" id="edit-profile-btn" data-i18n="editProfile">
+              Edit profile
+            </button>
+          </section>
+
+          <section class="card form-card hidden" id="profile-editor-card">
+            <h2 data-i18n="profileEditorTitle">Edit Profile</h2>
+            <form id="profile-form" class="stack">
+              <label for="profile-name-input" data-i18n="displayNameLabel">Display name</label>
+              <input
+                id="profile-name-input"
+                type="text"
+                maxlength="60"
+                placeholder="How your name appears in the app"
+                required
+              />
+              <div class="profile-actions">
+                <button class="soft-btn" type="button" id="cancel-profile-edit">
+                  Cancel
+                </button>
+                <button class="primary-btn" type="submit" id="save-profile-btn">
+                  Save Name
+                </button>
+              </div>
+            </form>
           </section>
 
           <section class="card form-card">

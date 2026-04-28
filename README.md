@@ -69,6 +69,7 @@ In Supabase, enable:
 - `sos_events`
 - `route_history`
 - `user_preferences`
+- `user_profiles`
 
 ## CRUD implemented in app
 
@@ -77,4 +78,5 @@ In Supabase, enable:
 - Route history: create, read, update favorite, delete
 - SOS events: create + read latest event
 - User preferences: upsert + read
+- User profile: upsert + read display name from Settings "Edit profile"
 
