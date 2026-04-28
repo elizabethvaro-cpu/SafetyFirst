@@ -1,9 +1,27 @@
+import {
+  supabase,
+  deviceId,
+  isSupabaseConfigured,
+  ensureAnonymousSession,
+} from "./supabaseClient.js";
+
 const pageTitle = document.getElementById("page-title");
 const pages = [...document.querySelectorAll(".page")];
 const navItems = [...document.querySelectorAll(".nav-item")];
 const toast = document.getElementById("toast");
 const themeSelect = document.getElementById("theme-select");
 const languageSelect = document.getElementById("language-select");
+const incidentFeed = document.getElementById("incident-feed");
+const myReportsList = document.getElementById("my-reports-list");
+const trustedContactsList = document.getElementById("trusted-contacts-list");
+const trustedContactForm = document.getElementById("trusted-contact-form");
+const routeHistoryList = document.getElementById("route-history-list");
+const lastSosTime = document.getElementById("last-sos-time");
+const incidentsTodayCount = document.getElementById("incidents-today-count");
+const safeZonesCount = document.getElementById("safe-zones-count");
+const patrolUnitsCount = document.getElementById("patrol-units-count");
+const riskPill = document.querySelector(".pill");
+const alertsBadge = document.querySelector("[data-action='alerts-center']");
 
 const labels = {
   map: "Safety Map",
@@ -11,6 +29,16 @@ const labels = {
   sos: "SOS Center",
   gps: "GPS Safe Route",
   settings: "Settings",
+};
+
+const state = {
+  currentUserId: null,
+  selectedIncidentType: "crime",
+  selectedRouteKey: "A",
+  incidents: [],
+  myReports: [],
+  contacts: [],
+  routes: [],
 };
 
 const copy = {
@@ -97,6 +125,16 @@ const copy = {
     locationShared: "Live location shared.",
     sosBroadcasted: "SOS broadcast sent to trusted contacts.",
     routeReady: "Safest route generated.",
+    databaseDisabled:
+      "Supabase is not configured. Add env values and restart the app.",
+    savedPreferences: "Preferences saved.",
+    reportUpdated: "Report updated.",
+    reportDeleted: "Report deleted.",
+    contactSaved: "Trusted contact saved.",
+    contactDeleted: "Trusted contact deleted.",
+    routeSaved: "Route saved to history.",
+    routeDeleted: "Route deleted.",
+    routeUpdated: "Route updated.",
   },
   es: {
     mapTitle: "Mapa de Seguridad",
@@ -181,6 +219,16 @@ const copy = {
     locationShared: "Ubicacion en vivo compartida.",
     sosBroadcasted: "SOS enviado a tus contactos de confianza.",
     routeReady: "Ruta segura generada.",
+    databaseDisabled:
+      "Supabase no esta configurado. Agrega variables de entorno y reinicia la app.",
+    savedPreferences: "Preferencias guardadas.",
+    reportUpdated: "Reporte actualizado.",
+    reportDeleted: "Reporte eliminado.",
+    contactSaved: "Contacto guardado.",
+    contactDeleted: "Contacto eliminado.",
+    routeSaved: "Ruta guardada.",
+    routeDeleted: "Ruta eliminada.",
+    routeUpdated: "Ruta actualizada.",
   },
   fr: {
     mapTitle: "Carte de Securite",
@@ -265,6 +313,16 @@ const copy = {
     locationShared: "Position en direct partagee.",
     sosBroadcasted: "SOS diffuse a vos contacts de confiance.",
     routeReady: "Itineraire securise genere.",
+    databaseDisabled:
+      "Supabase n'est pas configure. Ajoutez les variables d'environnement et redemarrez l'application.",
+    savedPreferences: "Preferences enregistrees.",
+    reportUpdated: "Signalement mis a jour.",
+    reportDeleted: "Signalement supprime.",
+    contactSaved: "Contact de confiance enregistre.",
+    contactDeleted: "Contact supprime.",
+    routeSaved: "Itineraire enregistre.",
+    routeDeleted: "Itineraire supprime.",
+    routeUpdated: "Itineraire mis a jour.",
   },
 };
 
@@ -291,6 +349,313 @@ function applyLanguage(language) {
   pageTitle.textContent = selected[`${activePage}Title`] || labels[activePage];
 }
 
+function text(key) {
+  return (copy[languageSelect.value] || copy.en)[key] || copy.en[key] || key;
+}
+
+function hasDatabaseSession() {
+  if (!supabase) {
+    showToast(text("databaseDisabled"));
+    return false;
+  }
+  if (!state.currentUserId) {
+    showToast("Unable to establish user session.");
+    return false;
+  }
+  return true;
+}
+
+function escapeHtml(value) {
+  const div = document.createElement("div");
+  div.textContent = value || "";
+  return div.innerHTML;
+}
+
+function timeAgo(input) {
+  if (!input) return "";
+  const date = new Date(input);
+  if (Number.isNaN(date.getTime())) return "";
+  const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
+
+function severityLabel(level) {
+  if (level === "high") return text("highRisk");
+  if (level === "medium") return text("mediumRisk");
+  return "Low";
+}
+
+function severityClass(level) {
+  if (level === "high") return "high";
+  if (level === "medium") return "medium";
+  return "medium";
+}
+
+function renderIncidentFeed() {
+  if (!state.incidents.length) {
+    incidentFeed.innerHTML = `<li class="empty-state">No incidents reported yet.</li>`;
+    incidentsTodayCount.textContent = "0";
+    alertsBadge.textContent = "0";
+    riskPill.textContent = "Risk: Low";
+    return;
+  }
+
+  incidentFeed.innerHTML = state.incidents
+    .map(
+      (incident) => `
+      <li>
+        <span class="danger-tag ${severityClass(incident.severity)}">${escapeHtml(severityLabel(incident.severity))}</span>
+        <div>
+          <p>${escapeHtml(incident.details)}</p>
+          <small>${escapeHtml(incident.location_text || "Unknown")} • ${escapeHtml(timeAgo(incident.created_at))}</small>
+        </div>
+      </li>`
+    )
+    .join("");
+
+  const today = new Date().toISOString().slice(0, 10);
+  const todayCount = state.incidents.filter((item) =>
+    String(item.created_at || "").startsWith(today)
+  ).length;
+  const highCount = state.incidents.filter((item) => item.severity === "high").length;
+  const mediumCount = state.incidents.filter((item) => item.severity === "medium").length;
+
+  incidentsTodayCount.textContent = String(todayCount);
+  safeZonesCount.textContent = String(Math.max(1, 8 - highCount));
+  patrolUnitsCount.textContent = String(Math.max(2, 4 + mediumCount));
+  alertsBadge.textContent = String(state.incidents.length);
+  riskPill.textContent =
+    highCount > 0 ? "Risk: High" : mediumCount > 0 ? "Risk: Medium" : "Risk: Low";
+}
+
+function renderMyReports() {
+  if (!state.myReports.length) {
+    myReportsList.innerHTML = `<div class="empty-state">No reports submitted yet.</div>`;
+    return;
+  }
+
+  myReportsList.innerHTML = state.myReports
+    .map(
+      (report) => `
+      <article class="contact-row">
+        <div>
+          <strong>${escapeHtml(report.incident_type)} • ${escapeHtml(report.severity)}</strong>
+          <small>${escapeHtml(report.location_text)} • ${escapeHtml(report.status)} • ${escapeHtml(timeAgo(report.created_at))}</small>
+        </div>
+        <div class="contact-actions">
+          <button class="tiny-btn" data-action="toggle-report-status" data-id="${report.id}" data-status="${report.status}">
+            ${report.status === "resolved" ? "Reopen" : "Resolve"}
+          </button>
+          <button class="tiny-btn" data-action="delete-report" data-id="${report.id}">
+            Delete
+          </button>
+        </div>
+      </article>`
+    )
+    .join("");
+}
+
+function renderTrustedContacts() {
+  if (!state.contacts.length) {
+    trustedContactsList.innerHTML = `<div class="empty-state">No trusted contacts added.</div>`;
+    return;
+  }
+
+  trustedContactsList.innerHTML = state.contacts
+    .map(
+      (contact) => `
+      <article class="contact-row">
+        <div>
+          <strong>${escapeHtml(contact.contact_name)}</strong>
+          <small>${escapeHtml(contact.phone_number)}${contact.relationship ? ` • ${escapeHtml(contact.relationship)}` : ""}</small>
+        </div>
+        <div class="contact-actions">
+          <button class="tiny-btn" data-action="edit-contact" data-id="${contact.id}">Edit</button>
+          <button class="tiny-btn" data-action="delete-contact" data-id="${contact.id}">Delete</button>
+        </div>
+      </article>`
+    )
+    .join("");
+}
+
+function renderRouteHistory() {
+  if (!state.routes.length) {
+    routeHistoryList.innerHTML = `<div class="empty-state">No routes saved yet.</div>`;
+    return;
+  }
+
+  routeHistoryList.innerHTML = state.routes
+    .map(
+      (route) => `
+      <article class="contact-row">
+        <div>
+          <strong>${escapeHtml(route.origin)} → ${escapeHtml(route.destination)}</strong>
+          <small>${escapeHtml(route.route_key)} • ${escapeHtml(route.risk_level)} • ${escapeHtml(route.eta_minutes)} min • ${escapeHtml(timeAgo(route.created_at))}</small>
+        </div>
+        <div class="contact-actions">
+          <button class="tiny-btn" data-action="toggle-route-favorite" data-id="${route.id}" data-favorite="${route.is_favorite}">
+            ${route.is_favorite ? "Unfavorite" : "Favorite"}
+          </button>
+          <button class="tiny-btn" data-action="delete-route" data-id="${route.id}">
+            Delete
+          </button>
+        </div>
+      </article>`
+    )
+    .join("");
+}
+
+async function fetchIncidentFeed() {
+  if (!supabase) return;
+  const { data, error } = await supabase
+    .from("incident_reports")
+    .select("id, incident_type, severity, location_text, details, created_at, status")
+    .eq("status", "active")
+    .order("created_at", { ascending: false })
+    .limit(25);
+  if (error) {
+    showToast(error.message);
+    return;
+  }
+  state.incidents = data || [];
+  renderIncidentFeed();
+}
+
+async function fetchMyReports() {
+  if (!supabase || !state.currentUserId) return;
+  const { data, error } = await supabase
+    .from("incident_reports")
+    .select("id, incident_type, severity, location_text, status, created_at")
+    .eq("reporter_user_id", state.currentUserId)
+    .order("created_at", { ascending: false })
+    .limit(25);
+  if (error) {
+    showToast(error.message);
+    return;
+  }
+  state.myReports = data || [];
+  renderMyReports();
+}
+
+async function fetchTrustedContacts() {
+  if (!supabase || !state.currentUserId) return;
+  const { data, error } = await supabase
+    .from("trusted_contacts")
+    .select("id, contact_name, phone_number, relationship")
+    .eq("owner_user_id", state.currentUserId)
+    .order("created_at", { ascending: false });
+  if (error) {
+    showToast(error.message);
+    return;
+  }
+  state.contacts = data || [];
+  renderTrustedContacts();
+}
+
+async function fetchRouteHistory() {
+  if (!supabase || !state.currentUserId) return;
+  const { data, error } = await supabase
+    .from("route_history")
+    .select("id, origin, destination, route_key, risk_level, eta_minutes, is_favorite, created_at")
+    .eq("owner_user_id", state.currentUserId)
+    .order("created_at", { ascending: false })
+    .limit(20);
+  if (error) {
+    showToast(error.message);
+    return;
+  }
+  state.routes = data || [];
+  renderRouteHistory();
+}
+
+async function fetchLastSosEvent() {
+  if (!supabase || !state.currentUserId) return;
+  const { data, error } = await supabase
+    .from("sos_events")
+    .select("created_at, trigger_type")
+    .eq("user_id", state.currentUserId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error && error.code !== "PGRST116") {
+    showToast(error.message);
+    return;
+  }
+  if (!data) {
+    lastSosTime.textContent = "No SOS event logged yet.";
+    return;
+  }
+  lastSosTime.textContent = `Last SOS: ${data.trigger_type} • ${timeAgo(data.created_at)}`;
+}
+
+async function savePreferences() {
+  if (!supabase || !state.currentUserId) return;
+  const payload = {
+    owner_user_id: state.currentUserId,
+    owner_device_id: deviceId,
+    language: languageSelect.value,
+    theme: themeSelect.value,
+    push_alerts: document.getElementById("push-alerts").checked,
+    location_sharing: document.getElementById("location-sharing").checked,
+    auto_siren: document.getElementById("auto-siren").checked,
+    share_route: document.getElementById("share-route").checked,
+  };
+
+  const { error } = await supabase.from("user_preferences").upsert(payload, {
+    onConflict: "owner_user_id",
+  });
+  if (error) {
+    showToast(error.message);
+    return;
+  }
+  showToast(text("savedPreferences"));
+}
+
+async function loadPreferences() {
+  if (!supabase || !state.currentUserId) return;
+  const { data, error } = await supabase
+    .from("user_preferences")
+    .select(
+      "language, theme, push_alerts, location_sharing, auto_siren, share_route, owner_device_id"
+    )
+    .eq("owner_user_id", state.currentUserId)
+    .maybeSingle();
+  if (error && error.code !== "PGRST116") {
+    showToast(error.message);
+    return;
+  }
+  if (!data) return;
+  languageSelect.value = data.language || "en";
+  themeSelect.value = data.theme || "light";
+  document.getElementById("push-alerts").checked = Boolean(data.push_alerts);
+  document.getElementById("location-sharing").checked = Boolean(data.location_sharing);
+  document.getElementById("auto-siren").checked = Boolean(data.auto_siren);
+  document.getElementById("share-route").checked = Boolean(data.share_route);
+  document.body.classList.toggle("dark", themeSelect.value === "dark");
+  applyLanguage(languageSelect.value);
+}
+
+async function logSosEvent(triggerType) {
+  if (!supabase || !state.currentUserId) return;
+  const { error } = await supabase.from("sos_events").insert({
+    user_id: state.currentUserId,
+    device_id: deviceId,
+    trigger_type: triggerType,
+    note: "Triggered from app UI",
+  });
+  if (error) {
+    showToast(error.message);
+    return;
+  }
+  await fetchLastSosEvent();
+}
+
 navItems.forEach((item) => {
   item.addEventListener("click", () => switchPage(item.dataset.target));
 });
@@ -300,6 +665,7 @@ document.querySelectorAll("#incident-chip-row .chip").forEach((chip) => {
     document
       .querySelectorAll("#incident-chip-row .chip")
       .forEach((other) => other.classList.toggle("active", other === chip));
+    state.selectedIncidentType = chip.dataset.type;
   });
 });
 
@@ -308,21 +674,71 @@ document.querySelectorAll("#route-options .route-option").forEach((option) => {
     document
       .querySelectorAll("#route-options .route-option")
       .forEach((other) => other.classList.toggle("active", other === option));
+    state.selectedRouteKey = option.dataset.routeKey;
   });
 });
 
 document.getElementById("report-form").addEventListener("submit", (event) => {
   event.preventDefault();
-  event.target.reset();
-  document
-    .querySelectorAll("#incident-chip-row .chip")
-    .forEach((chip, idx) => chip.classList.toggle("active", idx === 0));
-  showToast((copy[languageSelect.value] || copy.en).reportSent);
+  if (!hasDatabaseSession()) {
+    return;
+  }
+  (async () => {
+    const payload = {
+      reporter_user_id: state.currentUserId,
+      incident_type: state.selectedIncidentType,
+      severity: document.getElementById("report-severity").value,
+      location_text: document.getElementById("report-location").value.trim(),
+      details: document.getElementById("report-details").value.trim(),
+      is_anonymous: document.getElementById("report-anonymous").checked,
+      reporter_device_id: deviceId,
+      status: "active",
+    };
+    const { error } = await supabase.from("incident_reports").insert(payload);
+    if (error) {
+      showToast(error.message);
+      return;
+    }
+    event.target.reset();
+    document
+      .querySelectorAll("#incident-chip-row .chip")
+      .forEach((chip, idx) => chip.classList.toggle("active", idx === 0));
+    state.selectedIncidentType = "crime";
+    await Promise.all([fetchIncidentFeed(), fetchMyReports()]);
+    showToast(text("reportSent"));
+  })();
 });
 
 document.getElementById("route-form").addEventListener("submit", (event) => {
   event.preventDefault();
-  showToast((copy[languageSelect.value] || copy.en).routeReady);
+  if (!hasDatabaseSession()) {
+    return;
+  }
+  (async () => {
+    const routeA = { eta: 14, risk: "low" };
+    const routeB = { eta: 11, risk: "medium" };
+    const routeMeta = state.selectedRouteKey === "B" ? routeB : routeA;
+    const { error } = await supabase.from("route_history").insert({
+      owner_user_id: state.currentUserId,
+      owner_device_id: deviceId,
+      origin: document.getElementById("origin").value.trim(),
+      destination: document.getElementById("destination").value.trim(),
+      route_key: state.selectedRouteKey,
+      risk_level: routeMeta.risk,
+      eta_minutes: routeMeta.eta,
+      options: {
+        well_lit: document.querySelectorAll("#route-form fieldset input")[0].checked,
+        avoid_isolated: document.querySelectorAll("#route-form fieldset input")[1].checked,
+        avoid_traffic: document.querySelectorAll("#route-form fieldset input")[2].checked,
+      },
+    });
+    if (error) {
+      showToast(error.message);
+      return;
+    }
+    await fetchRouteHistory();
+    showToast(text("routeSaved"));
+  })();
 });
 
 document
@@ -333,15 +749,17 @@ document
 
 document
   .querySelector("[data-action='broadcast-sos']")
-  .addEventListener("click", () =>
-    showToast((copy[languageSelect.value] || copy.en).sosBroadcasted)
-  );
+  .addEventListener("click", async () => {
+    showToast(text("sosBroadcasted"));
+    await logSosEvent("broadcast");
+  });
 
 document
   .querySelector("[data-action='silent-sos']")
-  .addEventListener("click", () =>
-    showToast((copy[languageSelect.value] || copy.en).sosBroadcasted)
-  );
+  .addEventListener("click", async () => {
+    showToast(text("sosBroadcasted"));
+    await logSosEvent("silent");
+  });
 
 document
   .querySelector("[data-action='alerts-center']")
@@ -353,6 +771,146 @@ document
     showToast((copy[languageSelect.value] || copy.en).uploadProof)
   );
 
+document.getElementById("refresh-my-reports").addEventListener("click", fetchMyReports);
+document.getElementById("refresh-routes").addEventListener("click", fetchRouteHistory);
+document.getElementById("save-preferences-btn").addEventListener("click", savePreferences);
+
+myReportsList.addEventListener("click", async (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) return;
+  const id = target.dataset.id;
+  if (!id || !supabase) return;
+
+  if (target.dataset.action === "toggle-report-status") {
+    const nextStatus = target.dataset.status === "resolved" ? "active" : "resolved";
+    const { error } = await supabase
+      .from("incident_reports")
+      .update({ status: nextStatus })
+      .eq("id", id)
+      .eq("reporter_user_id", state.currentUserId);
+    if (error) {
+      showToast(error.message);
+      return;
+    }
+    await Promise.all([fetchIncidentFeed(), fetchMyReports()]);
+    showToast(text("reportUpdated"));
+  }
+
+  if (target.dataset.action === "delete-report") {
+    const { error } = await supabase
+      .from("incident_reports")
+      .delete()
+      .eq("id", id)
+      .eq("reporter_user_id", state.currentUserId);
+    if (error) {
+      showToast(error.message);
+      return;
+    }
+    await Promise.all([fetchIncidentFeed(), fetchMyReports()]);
+    showToast(text("reportDeleted"));
+  }
+});
+
+trustedContactsList.addEventListener("click", async (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) return;
+  const id = target.dataset.id;
+  if (!id || !supabase) return;
+
+  if (target.dataset.action === "delete-contact") {
+    const { error } = await supabase
+      .from("trusted_contacts")
+      .delete()
+      .eq("id", id)
+      .eq("owner_user_id", state.currentUserId);
+    if (error) {
+      showToast(error.message);
+      return;
+    }
+    await fetchTrustedContacts();
+    showToast(text("contactDeleted"));
+  }
+
+  if (target.dataset.action === "edit-contact") {
+    const current = state.contacts.find((contact) => contact.id === id);
+    if (!current) return;
+    const contactName = window.prompt("Contact name", current.contact_name);
+    if (!contactName) return;
+    const phoneNumber = window.prompt("Phone number", current.phone_number);
+    if (!phoneNumber) return;
+    const relationship = window.prompt("Relationship", current.relationship || "") || null;
+    const { error } = await supabase
+      .from("trusted_contacts")
+      .update({ contact_name: contactName, phone_number: phoneNumber, relationship })
+      .eq("id", id)
+      .eq("owner_user_id", state.currentUserId);
+    if (error) {
+      showToast(error.message);
+      return;
+    }
+    await fetchTrustedContacts();
+    showToast(text("contactSaved"));
+  }
+});
+
+routeHistoryList.addEventListener("click", async (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) return;
+  const id = target.dataset.id;
+  if (!id || !supabase) return;
+
+  if (target.dataset.action === "delete-route") {
+    const { error } = await supabase
+      .from("route_history")
+      .delete()
+      .eq("id", id)
+      .eq("owner_user_id", state.currentUserId);
+    if (error) {
+      showToast(error.message);
+      return;
+    }
+    await fetchRouteHistory();
+    showToast(text("routeDeleted"));
+  }
+
+  if (target.dataset.action === "toggle-route-favorite") {
+    const nextFavorite = target.dataset.favorite !== "true";
+    const { error } = await supabase
+      .from("route_history")
+      .update({ is_favorite: nextFavorite })
+      .eq("id", id)
+      .eq("owner_user_id", state.currentUserId);
+    if (error) {
+      showToast(error.message);
+      return;
+    }
+    await fetchRouteHistory();
+    showToast(text("routeUpdated"));
+  }
+});
+
+trustedContactForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (!hasDatabaseSession()) {
+    return;
+  }
+  const payload = {
+    owner_user_id: state.currentUserId,
+    owner_device_id: deviceId,
+    contact_name: document.getElementById("contact-name").value.trim(),
+    phone_number: document.getElementById("contact-phone").value.trim(),
+    relationship: document.getElementById("contact-relationship").value.trim() || null,
+  };
+  const { error } = await supabase.from("trusted_contacts").insert(payload);
+  if (error) {
+    showToast(error.message);
+    return;
+  }
+  trustedContactForm.reset();
+  await fetchTrustedContacts();
+  showToast(text("contactSaved"));
+});
+
 themeSelect.addEventListener("change", () => {
   document.body.classList.toggle("dark", themeSelect.value === "dark");
 });
@@ -361,4 +919,49 @@ languageSelect.addEventListener("change", () => {
   applyLanguage(languageSelect.value);
 });
 
-applyLanguage("en");
+async function initApp() {
+  applyLanguage("en");
+  if (!isSupabaseConfigured) {
+    renderIncidentFeed();
+    renderMyReports();
+    renderTrustedContacts();
+    renderRouteHistory();
+    showToast(text("databaseDisabled"));
+    return;
+  }
+
+  try {
+    const user = await ensureAnonymousSession();
+    state.currentUserId = user?.id || null;
+  } catch (error) {
+    showToast(error.message || "Unable to start secure session.");
+    return;
+  }
+
+  if (!state.currentUserId) {
+    showToast("Unable to establish user session.");
+    return;
+  }
+
+  await Promise.all([
+    loadPreferences(),
+    fetchIncidentFeed(),
+    fetchMyReports(),
+    fetchTrustedContacts(),
+    fetchRouteHistory(),
+    fetchLastSosEvent(),
+  ]);
+
+  supabase
+    .channel("incidents-live-feed")
+    .on(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "incident_reports" },
+      () => {
+        fetchIncidentFeed();
+      }
+    )
+    .subscribe();
+}
+
+initApp();

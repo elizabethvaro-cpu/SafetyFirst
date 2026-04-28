@@ -39,15 +39,15 @@
 
           <div class="stat-row">
             <article class="stat-card">
-              <h3 data-i18n="incidentsToday">11</h3>
+              <h3 id="incidents-today-count" data-i18n="incidentsToday">11</h3>
               <p data-i18n="incidentsTodayLabel">Incidents today</p>
             </article>
             <article class="stat-card">
-              <h3 data-i18n="safeZones">6</h3>
+              <h3 id="safe-zones-count" data-i18n="safeZones">6</h3>
               <p data-i18n="safeZonesLabel">Safe zones nearby</p>
             </article>
             <article class="stat-card">
-              <h3 data-i18n="patrolUnits">4</h3>
+              <h3 id="patrol-units-count" data-i18n="patrolUnits">4</h3>
               <p data-i18n="patrolUnitsLabel">Patrol units active</p>
             </article>
           </div>
@@ -57,22 +57,7 @@
               <h2 data-i18n="nearbyAlerts">Nearby Alerts</h2>
               <button class="link-btn" data-i18n="viewAll">View all</button>
             </div>
-            <ul class="timeline">
-              <li>
-                <span class="danger-tag high" data-i18n="highRisk">High</span>
-                <div>
-                  <p data-i18n="alertOne">Theft reported near City Mall.</p>
-                  <small data-i18n="alertOneMeta">300m away • 14 min ago</small>
-                </div>
-              </li>
-              <li>
-                <span class="danger-tag medium" data-i18n="mediumRisk">Medium</span>
-                <div>
-                  <p data-i18n="alertTwo">Road accident near Oak Junction.</p>
-                  <small data-i18n="alertTwoMeta">1.2km away • 38 min ago</small>
-                </div>
-              </li>
-            </ul>
+            <ul class="timeline" id="incident-feed"></ul>
           </section>
         </section>
 
@@ -104,6 +89,13 @@
             </div>
 
             <form id="report-form" class="stack">
+              <label for="report-severity">Severity</label>
+              <select id="report-severity" required>
+                <option value="low">Low</option>
+                <option value="medium" selected>Medium</option>
+                <option value="high">High</option>
+              </select>
+
               <label for="report-location" data-i18n="incidentLocation">Location</label>
               <input id="report-location" type="text" placeholder="Street / Area" required />
 
@@ -129,6 +121,14 @@
               </button>
             </form>
           </section>
+
+          <section class="card stack">
+            <div class="card-head">
+              <h2>My Reports</h2>
+              <button class="link-btn" id="refresh-my-reports">Refresh</button>
+            </div>
+            <div id="my-reports-list" class="stack"></div>
+          </section>
         </section>
 
         <section class="page" id="page-sos" data-page="sos">
@@ -152,17 +152,17 @@
 
           <section class="card stack">
             <h2 data-i18n="trustedContacts">Trusted Contacts</h2>
-            <div class="contact-row">
-              <strong>Alex Johnson</strong>
-              <small>+1 555 1042</small>
-            </div>
-            <div class="contact-row">
-              <strong>Rina Patel</strong>
-              <small>+1 555 8892</small>
-            </div>
+            <div id="trusted-contacts-list" class="stack"></div>
+            <form id="trusted-contact-form" class="stack">
+              <input id="contact-name" type="text" placeholder="Contact name" required />
+              <input id="contact-phone" type="tel" placeholder="Phone number" required />
+              <input id="contact-relationship" type="text" placeholder="Relationship (optional)" />
+              <button class="soft-btn" type="submit">Add Trusted Contact</button>
+            </form>
             <button class="danger-btn" data-action="silent-sos" data-i18n="silentSos">
               Send Silent SOS
             </button>
+            <small id="last-sos-time" class="muted-note">No SOS event logged yet.</small>
           </section>
         </section>
 
@@ -198,11 +198,11 @@
             </fieldset>
 
             <div class="route-options" id="route-options">
-              <button type="button" class="route-option active">
+              <button type="button" class="route-option active" data-route-key="A">
                 <strong data-i18n="routeOptionOne">Route A</strong>
                 <small data-i18n="routeOptionOneMeta">14 min • Low risk</small>
               </button>
-              <button type="button" class="route-option">
+              <button type="button" class="route-option" data-route-key="B">
                 <strong data-i18n="routeOptionTwo">Route B</strong>
                 <small data-i18n="routeOptionTwoMeta">11 min • Medium risk</small>
               </button>
@@ -212,6 +212,14 @@
               <span data-i18n="findSafeRoute">Find Safest Route</span>
             </button>
           </form>
+
+          <section class="card stack">
+            <div class="card-head">
+              <h2>Recent Routes</h2>
+              <button class="link-btn" id="refresh-routes">Refresh</button>
+            </div>
+            <div id="route-history-list" class="stack"></div>
+          </section>
         </section>
 
         <section class="page" id="page-settings" data-page="settings">
@@ -248,6 +256,10 @@
               <span data-i18n="locationSharing">Auto location sharing</span>
               <input id="location-sharing" type="checkbox" />
             </label>
+
+            <button class="primary-btn" type="button" id="save-preferences-btn">
+              Save Preferences
+            </button>
           </section>
 
           <section class="card stack">
@@ -289,6 +301,6 @@
     </div>
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
-    <script src="script.js"></script>
+    <script type="module" src="script.js"></script>
   </body>
 </html>
