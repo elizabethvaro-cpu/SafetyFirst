@@ -894,6 +894,70 @@ function computeRouteDistanceMeters(path) {
   return total;
 }
 
+function formatDurationMinutes(totalMinutes) {
+  const safeMinutes = Math.max(1, Math.round(totalMinutes || 0));
+  if (safeMinutes < 60) return `${safeMinutes} min`;
+  const hours = Math.floor(safeMinutes / 60);
+  const minutes = safeMinutes % 60;
+  if (!minutes) return `${hours} hr`;
+  return `${hours} hr ${minutes} min`;
+}
+
+function buildTransitLeg(routeId, preferences) {
+  if (routeId === "A") {
+    return {
+      mode: "train",
+      label: "Train",
+      line: preferences.avoidTraffic ? "Metro Green Line" : "Metro Blue Line",
+      stops: preferences.wellLit ? 4 : 3,
+    };
+  }
+  if (routeId === "B") {
+    return {
+      mode: "bus",
+      label: "Bus",
+      line: preferences.avoidIsolated ? "Bus 22 Downtown Loop" : "Bus 17 Crosstown",
+      stops: preferences.avoidTraffic ? 6 : 5,
+    };
+  }
+  return {
+    mode: "bus",
+    label: "Bus",
+    line: "Bus 9 Local",
+    stops: preferences.avoidIsolated ? 5 : 4,
+  };
+}
+
+function buildRouteDirections(routeId, etaMinutes, preferences) {
+  const transitLeg = buildTransitLeg(routeId, preferences);
+  const walkStartMinutes = Math.max(3, Math.round(etaMinutes * 0.2));
+  const walkEndMinutes = Math.max(2, Math.round(etaMinutes * 0.17));
+  const transitMinutes = Math.max(4, etaMinutes - walkStartMinutes - walkEndMinutes);
+  const terminalName = routeId === "A" ? "Central Station" : routeId === "B" ? "Main St Stop" : "Civic Center Stop";
+  const arrivalName = routeId === "A" ? "Riverside Terminal" : routeId === "B" ? "Market Square Stop" : "North Gate Stop";
+
+  return [
+    {
+      mode: "walk",
+      label: "Walk",
+      durationMinutes: walkStartMinutes,
+      instruction: `Walk to ${terminalName}.`,
+    },
+    {
+      mode: transitLeg.mode,
+      label: transitLeg.label,
+      durationMinutes: transitMinutes,
+      instruction: `Take ${transitLeg.line} for ${transitLeg.stops} stops to ${arrivalName}.`,
+    },
+    {
+      mode: "walk",
+      label: "Walk",
+      durationMinutes: walkEndMinutes,
+      instruction: "Walk from the stop to your destination.",
+    },
+  ];
+}
+
 function computeRouteSafetyMetrics(path, preferences) {
   const incidents = state.incidents.filter((item) => item.status === "active");
   let weightedRisk = 0;
@@ -954,6 +1018,7 @@ function buildRouteOption({ id, title, path, speedBiasMinutes = 0, safetyBias = 
   const etaMinutes = Math.max(5, baseMinutes + speedBiasMinutes);
   const adjustedScore = Math.max(0, Math.min(100, metrics.score + safetyBias));
   const riskLevel = adjustedScore >= 72 ? "low" : adjustedScore >= 48 ? "medium" : "high";
+  const directions = buildRouteDirections(id, etaMinutes, preferences);
 
   return {
     id,
@@ -963,6 +1028,7 @@ function buildRouteOption({ id, title, path, speedBiasMinutes = 0, safetyBias = 
     score: adjustedScore,
     riskLevel,
     etaMinutes,
+    directions,
     nearbyIncidents: metrics.nearbyIncidents,
   };
 }
@@ -1024,6 +1090,18 @@ function renderGpsRouteOptions() {
           <strong>${escapeHtml(route.title)}</strong>
           <small>${route.etaMinutes} min • ${escapeHtml(mapGpsRiskLabel(route.riskLevel))} • Score ${route.score}</small>
           <small class="route-status-note">${route.nearbyIncidents} nearby alerts on this path</small>
+          <ol class="route-directions" aria-label="Route directions">
+            ${(Array.isArray(route.directions) ? route.directions : [])
+              .map(
+                (step) =>
+                  `<li><span class="step-mode">${escapeHtml(step.label)}:</span> ${escapeHtml(
+                    step.instruction
+                  )} <span class="step-duration">(${escapeHtml(
+                    formatDurationMinutes(step.durationMinutes)
+                  )})</span></li>`
+              )
+              .join("")}
+          </ol>
           <div class="gps-route-rate">
             <button type="button" class="gps-rate-btn" data-action="rate-gps-route" data-route-id="${route.id}" data-rating="5">Rate 5</button>
             <button type="button" class="gps-rate-btn" data-action="rate-gps-route" data-route-id="${route.id}" data-rating="4">Rate 4</button>
