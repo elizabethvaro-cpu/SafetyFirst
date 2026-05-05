@@ -699,6 +699,124 @@ fieldset {
   border: 1px solid var(--line);
 }
 
+#gps-live-map {
+  height: 180px;
+  width: 100%;
+  border-radius: 0.8rem;
+}
+
+.gps-map-hint {
+  position: absolute;
+  left: 0.8rem;
+  bottom: 0.8rem;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 0.7rem;
+  color: var(--muted);
+  padding: 0.25rem 0.55rem;
+  z-index: 450;
+}
+
+.gps-danger-pin-wrap {
+  background: transparent;
+  border: 0;
+}
+
+.gps-danger-pin {
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  display: block;
+  border: 2px solid #fff;
+  background: #ef4444;
+  box-shadow: 0 4px 10px rgba(15, 23, 42, 0.28);
+}
+
+.gps-waypoint-pin-wrap {
+  background: transparent;
+  border: 0;
+}
+
+.gps-waypoint-pin {
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  display: block;
+  border: 2px solid #fff;
+  box-shadow: 0 4px 10px rgba(15, 23, 42, 0.22);
+}
+
+.gps-waypoint-pin.start {
+  background: #16a34a;
+}
+
+.gps-waypoint-pin.destination {
+  background: #dc2626;
+}
+
+.route-option small.route-status-note {
+  display: block;
+  margin-top: 0.2rem;
+}
+
+.route-option small.route-feedback-note {
+  display: block;
+  margin-top: 0.2rem;
+  color: var(--muted);
+}
+
+.community-route-item {
+  border: 1px solid var(--line);
+  border-radius: 0.75rem;
+  padding: 0.6rem;
+}
+
+.community-route-item p {
+  margin: 0.12rem 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.community-route-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.35rem;
+}
+
+.community-route-tag {
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  padding: 0.14rem 0.44rem;
+  font-size: 0.68rem;
+  color: var(--muted);
+  background: #fff;
+}
+
+.gps-route-alert {
+  border: 1px solid #fca5a5;
+  background: #fef2f2;
+  color: #991b1b;
+  border-radius: 0.65rem;
+  padding: 0.5rem 0.6rem;
+  font-size: 0.76rem;
+}
+
+.gps-route-rate {
+  display: flex;
+  gap: 0.4rem;
+  margin-top: 0.4rem;
+}
+
+.gps-rate-btn {
+  border: 1px solid var(--line);
+  background: #fff;
+  border-radius: 0.45rem;
+  font-size: 0.72rem;
+  padding: 0.25rem 0.45rem;
+}
+
 .route-dot {
   position: absolute;
   width: 15px;
@@ -711,12 +829,14 @@ fieldset {
   background: var(--safe);
   left: 15%;
   top: 65%;
+  z-index: 410;
 }
 
 .route-dot.end {
   background: var(--danger);
   left: 78%;
   top: 26%;
+  z-index: 410;
 }
 
 .route-line {
@@ -740,11 +860,13 @@ fieldset {
 .route-badge.start {
   left: 10%;
   top: 73%;
+  z-index: 420;
 }
 
 .route-badge.end {
   right: 8%;
   top: 16%;
+  z-index: 420;
 }
 
 .route-options {
@@ -759,6 +881,25 @@ fieldset {
   background: #fff;
   padding: 0.55rem 0.65rem;
   color: var(--text);
+}
+
+.route-option.low-risk {
+  border-color: #86efac;
+  background: #f0fdf4;
+}
+
+.route-option.medium-risk {
+  border-color: #fde68a;
+  background: #fffbeb;
+}
+
+.route-option.high-risk {
+  border-color: #fca5a5;
+  background: #fef2f2;
+}
+
+.route-option.recommended {
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.22);
 }
 
 .route-option.active {
@@ -887,6 +1028,10 @@ body.dark .route-badge {
   color: #f8fafc;
 }
 
+body.dark .gps-map-hint {
+  background: rgba(15, 24, 41, 0.92);
+}
+
 @media (max-width: 359px) {
   .app-header {
     padding: 0.85rem 0.75rem 0.35rem;
@@ -902,6 +1047,10 @@ body.dark .route-badge {
 
   #live-map {
     height: min(56vh, 360px);
+  }
+
+  #gps-live-map {
+    height: 170px;
   }
 
   .map-filter-row {
@@ -944,6 +1093,10 @@ body.dark .route-badge {
 
   #live-map {
     height: 500px;
+  }
+
+  #gps-live-map {
+    height: 210px;
   }
 
   .bottom-nav {
