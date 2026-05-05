@@ -443,10 +443,28 @@ function showToast(message) {
   setTimeout(() => toast.classList.remove("show"), 2200);
 }
 
+function invalidateMapLayout(mapInstance) {
+  if (!mapInstance) return;
+  requestAnimationFrame(() => {
+    mapInstance.invalidateSize();
+    setTimeout(() => mapInstance.invalidateSize(), 120);
+  });
+}
+
+function refreshActivePageMap(targetPage) {
+  if (targetPage === "map") {
+    invalidateMapLayout(state.map.instance);
+  }
+  if (targetPage === "gps") {
+    invalidateMapLayout(state.gps.map);
+  }
+}
+
 function switchPage(target) {
   pages.forEach((page) => page.classList.toggle("active", page.dataset.page === target));
   navItems.forEach((item) => item.classList.toggle("active", item.dataset.target === target));
   pageTitle.textContent = (copy[languageSelect.value] || copy.en)[`${target}Title`] || labels[target];
+  refreshActivePageMap(target);
 }
 
 function applyLanguage(language) {
@@ -2087,6 +2105,12 @@ async function saveUserProfileName(name) {
 
 navItems.forEach((item) => {
   item.addEventListener("click", () => switchPage(item.dataset.target));
+});
+
+window.addEventListener("resize", () => {
+  const activePage = document.querySelector(".page.active")?.dataset.page;
+  if (!activePage) return;
+  refreshActivePageMap(activePage);
 });
 
 document.querySelectorAll("#incident-chip-row .chip").forEach((chip) => {
