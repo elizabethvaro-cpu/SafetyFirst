@@ -26,6 +26,8 @@
   "homepage": "https://github.com/elizabethvaro-cpu/SafetyFirst#readme",
   "dependencies": {
     "@supabase/supabase-js": "^2.105.1",
+    "leaflet": "^1.9.4",
+    "supercluster": "^8.0.1",
     "vite": "^8.0.10"
   }
 }

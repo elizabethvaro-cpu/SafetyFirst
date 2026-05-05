@@ -4,6 +4,8 @@ import {
   isSupabaseConfigured,
   ensureAnonymousSession,
 } from "./supabaseClient.js";
+import L from "leaflet";
+import Supercluster from "supercluster";
 
 const pageTitle = document.getElementById("page-title");
 const pages = [...document.querySelectorAll(".page")];
@@ -17,10 +19,6 @@ const trustedContactsList = document.getElementById("trusted-contacts-list");
 const trustedContactForm = document.getElementById("trusted-contact-form");
 const routeHistoryList = document.getElementById("route-history-list");
 const lastSosTime = document.getElementById("last-sos-time");
-const incidentsTodayCount = document.getElementById("incidents-today-count");
-const safeZonesCount = document.getElementById("safe-zones-count");
-const patrolUnitsCount = document.getElementById("patrol-units-count");
-const riskPill = document.querySelector(".pill");
 const alertsBadge = document.querySelector("[data-action='alerts-center']");
 const profileDisplayName = document.getElementById("profile-display-name");
 const editProfileBtn = document.getElementById("edit-profile-btn");
@@ -31,7 +29,33 @@ const cancelProfileEditBtn = document.getElementById("cancel-profile-edit");
 const simpleProfileForm = document.getElementById("simple-profile-form");
 const simpleProfileNameInput = document.getElementById("simple-profile-name");
 const simpleProfileEmailInput = document.getElementById("simple-profile-email");
-const simpleProfilesList = document.getElementById("simple-profile-list");
+const simpleProfilesList = document.getElementById("simple-profiles-list");
+const mapContainer = document.getElementById("live-map");
+const mapIncidentsSummary = document.getElementById("map-incidents-summary");
+const mapCriticalCount = document.getElementById("map-critical-count");
+const mapHighCount = document.getElementById("map-high-count");
+const mapMediumCount = document.getElementById("map-medium-count");
+const mapFloatingTotal = document.getElementById("map-floating-total");
+const geoPermissionStatus = document.getElementById("geo-permission-status");
+const mapDetailsSheet = document.getElementById("map-details-sheet");
+const mapSheetTotal = document.getElementById("map-sheet-total");
+const mapSheetTypes = document.getElementById("map-sheet-types");
+const mapSheetSeverity = document.getElementById("map-sheet-severity");
+const mapSheetLatest = document.getElementById("map-sheet-latest");
+const mapSelectedIncidents = document.getElementById("map-selected-incidents");
+const mapFilterTime = document.getElementById("map-filter-time");
+const mapFilterType = document.getElementById("map-filter-type");
+const mapFilterSeverity = document.getElementById("map-filter-severity");
+const mapFilterBtn = document.getElementById("map-filter-btn");
+const mapAlertsBtn = document.getElementById("map-alerts-btn");
+
+const MAP_DEFAULT_CENTER = { lat: 40.7128, lng: -74.006 };
+const MAP_SEARCH_RADIUS_METERS = 1207;
+const MAP_TIME_RANGE_TO_HOURS = {
+  "24h": 24,
+  "7d": 24 * 7,
+  "30d": 24 * 30,
+};
 
 const labels = {
   map: "Safety Map",
@@ -51,6 +75,24 @@ const state = {
   contacts: [],
   routes: [],
   simpleProfiles: [],
+  map: {
+    instance: null,
+    userMarker: null,
+    selectedMarker: null,
+    radiusCircle: null,
+    clusterLayer: null,
+    selectedLatLng: null,
+    userLatLng: null,
+    nearbyIncidents: [],
+    clusterIndex: null,
+    schemaHasCoordinates: true,
+    filters: {
+      timeRange: "7d",
+      type: "all",
+      severity: "all",
+    },
+    refreshTimeout: null,
+  },
 };
 
 const copy = {
@@ -416,23 +458,110 @@ function timeAgo(input) {
 }
 
 function severityLabel(level) {
+  if (level === "critical") return "Critical";
   if (level === "high") return text("highRisk");
   if (level === "medium") return text("mediumRisk");
   return "Low";
 }
 
 function severityClass(level) {
+  if (level === "critical") return "critical";
   if (level === "high") return "high";
   if (level === "medium") return "medium";
   return "medium";
 }
 
+function hashString(value) {
+  const textValue = String(value || "");
+  let hash = 0;
+  for (let i = 0; i < textValue.length; i += 1) {
+    hash = (hash << 5) - hash + textValue.charCodeAt(i);
+    hash |= 0;
+  }
+  return Math.abs(hash);
+}
+
+function deriveCoordinatesFromSeed(seed) {
+  const hash = hashString(seed || "safe-steps");
+  const latOffset = ((hash % 2000) / 2000 - 0.5) * 0.32;
+  const lngOffset = (((Math.floor(hash / 2000) % 2000) / 2000) - 0.5) * 0.42;
+  return {
+    lat: MAP_DEFAULT_CENTER.lat + latOffset,
+    lng: MAP_DEFAULT_CENTER.lng + lngOffset,
+    inferred: true,
+  };
+}
+
+function normalizeIncident(record) {
+  const normalized = { ...(record || {}) };
+  const lat = Number(normalized.incident_lat);
+  const lng = Number(normalized.incident_lng);
+  if (Number.isFinite(lat) && Number.isFinite(lng)) {
+    normalized.mapLat = lat;
+    normalized.mapLng = lng;
+    normalized.hasExactCoordinates = true;
+    return normalized;
+  }
+  const fallback = deriveCoordinatesFromSeed(
+    normalized.location_text || normalized.details || normalized.id
+  );
+  normalized.mapLat = fallback.lat;
+  normalized.mapLng = fallback.lng;
+  normalized.hasExactCoordinates = false;
+  return normalized;
+}
+
+function toRadians(value) {
+  return (value * Math.PI) / 180;
+}
+
+function distanceMeters(lat1, lng1, lat2, lng2) {
+  const radius = 6371000;
+  const dLat = toRadians(lat2 - lat1);
+  const dLng = toRadians(lng2 - lng1);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRadians(lat1)) *
+      Math.cos(toRadians(lat2)) *
+      Math.sin(dLng / 2) *
+      Math.sin(dLng / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return radius * c;
+}
+
+function formatTimestamp(input) {
+  if (!input) return "n/a";
+  const date = new Date(input);
+  if (Number.isNaN(date.getTime())) return "n/a";
+  return date.toLocaleString();
+}
+
+function toIsoUtcDateTime(date) {
+  return date.toISOString();
+}
+
+function setMapStatus(message) {
+  if (geoPermissionStatus) {
+    geoPermissionStatus.textContent = message;
+  }
+}
+
+function updateMapSummary(incidents = []) {
+  const criticalCount = incidents.filter((item) => item.severity === "critical").length;
+  const highCount = incidents.filter((item) => item.severity === "high").length;
+  const mediumCount = incidents.filter((item) => item.severity === "medium").length;
+  if (mapCriticalCount) mapCriticalCount.textContent = String(criticalCount);
+  if (mapHighCount) mapHighCount.textContent = String(highCount);
+  if (mapMediumCount) mapMediumCount.textContent = String(mediumCount);
+  if (mapFloatingTotal) mapFloatingTotal.textContent = String(incidents.length);
+  if (mapIncidentsSummary) mapIncidentsSummary.textContent = `${incidents.length} incidents nearby`;
+  if (alertsBadge) alertsBadge.textContent = String(incidents.length);
+}
+
 function renderIncidentFeed() {
   if (!state.incidents.length) {
     incidentFeed.innerHTML = `<li class="empty-state">No incidents reported yet.</li>`;
-    incidentsTodayCount.textContent = "0";
-    alertsBadge.textContent = "0";
-    riskPill.textContent = "Risk: Low";
+    updateMapSummary([]);
     return;
   }
 
@@ -449,19 +578,7 @@ function renderIncidentFeed() {
     )
     .join("");
 
-  const today = new Date().toISOString().slice(0, 10);
-  const todayCount = state.incidents.filter((item) =>
-    String(item.created_at || "").startsWith(today)
-  ).length;
-  const highCount = state.incidents.filter((item) => item.severity === "high").length;
-  const mediumCount = state.incidents.filter((item) => item.severity === "medium").length;
-
-  incidentsTodayCount.textContent = String(todayCount);
-  safeZonesCount.textContent = String(Math.max(1, 8 - highCount));
-  patrolUnitsCount.textContent = String(Math.max(2, 4 + mediumCount));
-  alertsBadge.textContent = String(state.incidents.length);
-  riskPill.textContent =
-    highCount > 0 ? "Risk: High" : mediumCount > 0 ? "Risk: Medium" : "Risk: Low";
+  updateMapSummary(state.incidents);
 }
 
 function renderMyReports() {
@@ -605,20 +722,402 @@ async function saveSimpleProfile(name, email) {
   return true;
 }
 
+function hasMissingCoordinateColumnError(error) {
+  if (!error) return false;
+  return /(incident_lat|incident_lng|column)/i.test(`${error.message} ${error.details || ""}`);
+}
+
+async function insertIncidentReport(payload) {
+  if (!supabase) return { error: { message: "Database unavailable." } };
+  const basePayload = { ...payload };
+  const mapSource = state.map.selectedLatLng || state.map.userLatLng;
+  let withCoordinates = { ...basePayload };
+  if (state.map.schemaHasCoordinates && mapSource) {
+    withCoordinates = {
+      ...basePayload,
+      incident_lat: Number(mapSource.lat.toFixed(6)),
+      incident_lng: Number(mapSource.lng.toFixed(6)),
+    };
+  }
+  let result = await supabase.from("incident_reports").insert(withCoordinates);
+  if (result.error && state.map.schemaHasCoordinates && hasMissingCoordinateColumnError(result.error)) {
+    state.map.schemaHasCoordinates = false;
+    result = await supabase.from("incident_reports").insert(basePayload);
+  }
+  return result;
+}
+
 async function fetchIncidentFeed() {
   if (!supabase) return;
+  const baseColumns = "id, incident_type, severity, location_text, details, created_at, status";
+  const selectedColumns = state.map.schemaHasCoordinates
+    ? `${baseColumns}, incident_lat, incident_lng`
+    : baseColumns;
   const { data, error } = await supabase
     .from("incident_reports")
-    .select("id, incident_type, severity, location_text, details, created_at, status")
+    .select(selectedColumns)
     .eq("status", "active")
     .order("created_at", { ascending: false })
-    .limit(25);
+    .limit(500);
   if (error) {
+    const missingCoordinateColumn =
+      state.map.schemaHasCoordinates && hasMissingCoordinateColumnError(error);
+    if (missingCoordinateColumn) {
+      state.map.schemaHasCoordinates = false;
+      await fetchIncidentFeed();
+      return;
+    }
     showToast(error.message);
     return;
   }
-  state.incidents = data || [];
+  state.incidents = (data || []).map(normalizeIncident);
   renderIncidentFeed();
+  refreshMapDataFromIncidents();
+}
+
+function getIncidentCutoffDate() {
+  const hours = MAP_TIME_RANGE_TO_HOURS[state.map.filters.timeRange] || MAP_TIME_RANGE_TO_HOURS["7d"];
+  return new Date(Date.now() - hours * 60 * 60 * 1000);
+}
+
+function filterIncidentForMap(incident) {
+  if (!incident || incident.status !== "active") return false;
+  const incidentDate = new Date(incident.created_at);
+  if (!Number.isNaN(incidentDate.getTime()) && incidentDate < getIncidentCutoffDate()) {
+    return false;
+  }
+  if (state.map.filters.type !== "all" && incident.incident_type !== state.map.filters.type) {
+    return false;
+  }
+  if (state.map.filters.severity !== "all" && incident.severity !== state.map.filters.severity) {
+    return false;
+  }
+  return true;
+}
+
+function getFilteredMapIncidents() {
+  return state.incidents.filter(filterIncidentForMap);
+}
+
+function getIncidentsWithinRadius(centerLatLng, incidents) {
+  if (!centerLatLng) return [];
+  return incidents
+    .filter((incident) => Number.isFinite(incident.mapLat) && Number.isFinite(incident.mapLng))
+    .map((incident) => ({
+      ...incident,
+      distance_meters: distanceMeters(
+        centerLatLng.lat,
+        centerLatLng.lng,
+        incident.mapLat,
+        incident.mapLng
+      ),
+    }))
+    .filter((incident) => incident.distance_meters <= MAP_SEARCH_RADIUS_METERS)
+    .sort((a, b) => a.distance_meters - b.distance_meters);
+}
+
+function buildSuperclusterIndex(incidents) {
+  const points = incidents
+    .filter((incident) => Number.isFinite(incident.mapLat) && Number.isFinite(incident.mapLng))
+    .map((incident) => ({
+      type: "Feature",
+      geometry: {
+        type: "Point",
+        coordinates: [incident.mapLng, incident.mapLat],
+      },
+      properties: {
+        incidentId: incident.id,
+      },
+    }));
+
+  const index = new Supercluster({
+    radius: 44,
+    maxZoom: 19,
+    minPoints: 2,
+  });
+  index.load(points);
+  state.map.clusterIndex = index;
+}
+
+function markerIconForSeverity(severity) {
+  const className = severityClass(severity);
+  return L.divIcon({
+    className: "map-incident-pin-wrap",
+    html: `<span class="map-incident-pin ${className}"></span>`,
+    iconSize: [16, 16],
+    iconAnchor: [8, 8],
+  });
+}
+
+function clusterIcon(count) {
+  return L.divIcon({
+    className: "map-cluster-pin-wrap",
+    html: `<span class="map-cluster-pin">${count}</span>`,
+    iconSize: [34, 34],
+    iconAnchor: [17, 17],
+  });
+}
+
+function renderClustersForViewport() {
+  const mapInstance = state.map.instance;
+  if (!mapInstance || !state.map.clusterLayer || !state.map.clusterIndex) return;
+  state.map.clusterLayer.clearLayers();
+
+  const bounds = mapInstance.getBounds();
+  const bbox = [bounds.getWest(), bounds.getSouth(), bounds.getEast(), bounds.getNorth()];
+  const zoom = Math.round(mapInstance.getZoom());
+  const clusters = state.map.clusterIndex.getClusters(bbox, zoom);
+
+  clusters.forEach((feature) => {
+    const [lng, lat] = feature.geometry.coordinates;
+    const props = feature.properties || {};
+    if (props.cluster) {
+      const marker = L.marker([lat, lng], {
+        icon: clusterIcon(props.point_count || 0),
+      });
+      marker.on("click", () => {
+        const expansionZoom = state.map.clusterIndex.getClusterExpansionZoom(props.cluster_id);
+        mapInstance.flyTo([lat, lng], Math.min(expansionZoom, 18), { duration: 0.35 });
+      });
+      marker.addTo(state.map.clusterLayer);
+      return;
+    }
+
+    const incident = state.incidents.find((item) => item.id === props.incidentId);
+    if (!incident) return;
+    const marker = L.marker([lat, lng], {
+      icon: markerIconForSeverity(incident.severity),
+    });
+    marker.on("click", () => {
+      marker
+        .bindPopup(
+          `<strong>${escapeHtml(incident.incident_type || "incident")}</strong><br>${escapeHtml(
+            incident.details || "No details"
+          )}<br><small>${escapeHtml(incident.location_text || "Unknown")} • ${escapeHtml(
+            timeAgo(incident.created_at)
+          )}</small>`
+        )
+        .openPopup();
+      selectMapLocation({ lat, lng }, { fromMarker: true });
+    });
+    marker.addTo(state.map.clusterLayer);
+  });
+}
+
+function renderMapDetailsSheet(incidents) {
+  if (!mapDetailsSheet) return;
+  mapDetailsSheet.classList.remove("hidden");
+  const total = incidents.length;
+  if (mapSheetTotal) mapSheetTotal.textContent = String(total);
+
+  if (!total) {
+    if (mapSheetTypes) mapSheetTypes.textContent = "Types: none";
+    if (mapSheetSeverity) mapSheetSeverity.textContent = "Severity: none";
+    if (mapSheetLatest) mapSheetLatest.textContent = "Latest report: n/a";
+    if (mapSelectedIncidents) {
+      mapSelectedIncidents.innerHTML = `<div class="empty-state">No incidents found in this radius.</div>`;
+    }
+    return;
+  }
+
+  const types = {};
+  const severities = {};
+  let latestAt = incidents[0]?.created_at || null;
+  incidents.forEach((incident) => {
+    types[incident.incident_type] = (types[incident.incident_type] || 0) + 1;
+    severities[incident.severity] = (severities[incident.severity] || 0) + 1;
+    if ((incident.created_at || "") > (latestAt || "")) {
+      latestAt = incident.created_at;
+    }
+  });
+  if (mapSheetTypes) {
+    mapSheetTypes.textContent = `Types: ${Object.entries(types)
+      .map(([key, count]) => `${key} (${count})`)
+      .join(", ")}`;
+  }
+  if (mapSheetSeverity) {
+    mapSheetSeverity.textContent = `Severity: ${Object.entries(severities)
+      .map(([key, count]) => `${key} (${count})`)
+      .join(", ")}`;
+  }
+  if (mapSheetLatest) mapSheetLatest.textContent = `Latest report: ${formatTimestamp(latestAt)}`;
+  if (mapSelectedIncidents) {
+    mapSelectedIncidents.innerHTML = incidents
+      .slice(0, 6)
+      .map(
+        (incident) => `
+          <article class="map-incident-detail">
+            <h4>${escapeHtml(incident.incident_type || "Incident")} • ${escapeHtml(
+              severityLabel(incident.severity)
+            )}</h4>
+            <p>${escapeHtml(incident.details || "No details")}</p>
+            <p>${escapeHtml(incident.location_text || "Unknown location")} • ${escapeHtml(
+              timeAgo(incident.created_at)
+            )}</p>
+          </article>`
+      )
+      .join("");
+  }
+}
+
+function updateSelectionLayers(latlng) {
+  if (!state.map.instance) return;
+  if (!state.map.selectedMarker) {
+    state.map.selectedMarker = L.circleMarker(latlng, {
+      radius: 7,
+      color: "#ef4444",
+      weight: 2,
+      fillColor: "#ef4444",
+      fillOpacity: 0.35,
+    }).addTo(state.map.instance);
+  } else {
+    state.map.selectedMarker.setLatLng(latlng);
+  }
+
+  if (!state.map.radiusCircle) {
+    state.map.radiusCircle = L.circle(latlng, {
+      radius: MAP_SEARCH_RADIUS_METERS,
+      color: "#ef4444",
+      weight: 1,
+      fillColor: "#ef4444",
+      fillOpacity: 0.1,
+    }).addTo(state.map.instance);
+  } else {
+    state.map.radiusCircle.setLatLng(latlng);
+    state.map.radiusCircle.setRadius(MAP_SEARCH_RADIUS_METERS);
+  }
+}
+
+function selectMapLocation(latlng, options = {}) {
+  state.map.selectedLatLng = latlng;
+  updateSelectionLayers(latlng);
+  if (!options.fromMarker && state.map.instance) {
+    state.map.instance.panTo(latlng, { animate: true, duration: 0.25 });
+  }
+  const nearby = getIncidentsWithinRadius(latlng, getFilteredMapIncidents());
+  state.map.nearbyIncidents = nearby;
+  updateMapSummary(nearby.length ? nearby : getFilteredMapIncidents());
+  renderMapDetailsSheet(nearby);
+}
+
+function refreshMapDataFromIncidents() {
+  const filtered = getFilteredMapIncidents();
+  buildSuperclusterIndex(filtered);
+  renderClustersForViewport();
+  if (state.map.selectedLatLng) {
+    const nearby = getIncidentsWithinRadius(state.map.selectedLatLng, filtered);
+    state.map.nearbyIncidents = nearby;
+    updateMapSummary(nearby.length ? nearby : filtered);
+    renderMapDetailsSheet(nearby);
+    return;
+  }
+  updateMapSummary(filtered);
+}
+
+function scheduleMapRefresh(delayMs = 80) {
+  if (state.map.refreshTimeout) {
+    window.clearTimeout(state.map.refreshTimeout);
+  }
+  state.map.refreshTimeout = window.setTimeout(() => {
+    state.map.refreshTimeout = null;
+    fetchIncidentFeed();
+  }, delayMs);
+}
+
+function setMapFiltersFromInputs() {
+  state.map.filters.timeRange = mapFilterTime?.value || "7d";
+  state.map.filters.type = mapFilterType?.value || "all";
+  state.map.filters.severity = mapFilterSeverity?.value || "all";
+}
+
+function bindMapUiEvents() {
+  [mapFilterTime, mapFilterType, mapFilterSeverity].forEach((el) => {
+    if (!el) return;
+    el.addEventListener("change", () => {
+      setMapFiltersFromInputs();
+      refreshMapDataFromIncidents();
+    });
+  });
+
+  if (mapFilterBtn) {
+    mapFilterBtn.addEventListener("click", () => {
+      if (!mapDetailsSheet) return;
+      mapDetailsSheet.classList.toggle("hidden");
+    });
+  }
+
+  if (mapAlertsBtn) {
+    mapAlertsBtn.addEventListener("click", () => {
+      if (!mapDetailsSheet) return;
+      mapDetailsSheet.classList.remove("hidden");
+      if (!state.map.selectedLatLng && state.map.instance) {
+        selectMapLocation(state.map.instance.getCenter());
+      }
+    });
+  }
+}
+
+function initializeMap() {
+  if (!mapContainer || state.map.instance) return;
+  const mapInstance = L.map(mapContainer, {
+    zoomControl: false,
+    attributionControl: false,
+  }).setView([MAP_DEFAULT_CENTER.lat, MAP_DEFAULT_CENTER.lng], 12);
+  state.map.instance = mapInstance;
+  state.map.clusterLayer = L.layerGroup().addTo(mapInstance);
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19,
+  }).addTo(mapInstance);
+  mapInstance.on("click", (event) => {
+    selectMapLocation(event.latlng);
+  });
+  mapInstance.on("moveend zoomend", () => {
+    renderClustersForViewport();
+  });
+  bindMapUiEvents();
+  setTimeout(() => mapInstance.invalidateSize(), 0);
+
+  if (!navigator.geolocation) {
+    if (geoPermissionStatus) geoPermissionStatus.textContent = "Geolocation is not supported.";
+    return;
+  }
+
+  navigator.geolocation.getCurrentPosition(
+    (position) => {
+      const latlng = {
+        lat: position.coords.latitude,
+        lng: position.coords.longitude,
+      };
+      state.map.userLatLng = latlng;
+      if (!state.map.userMarker) {
+        state.map.userMarker = L.circleMarker(latlng, {
+          radius: 6,
+          color: "#2563eb",
+          fillColor: "#2563eb",
+          fillOpacity: 0.8,
+          weight: 2,
+        }).addTo(mapInstance);
+      } else {
+        state.map.userMarker.setLatLng(latlng);
+      }
+      mapInstance.setView([latlng.lat, latlng.lng], 13);
+      if (geoPermissionStatus) geoPermissionStatus.textContent = "Location active.";
+    },
+    (error) => {
+      const message =
+        error.code === 1
+          ? "Location permission denied"
+          : error.code === 2
+            ? "Location unavailable"
+            : "Location request timed out";
+      if (geoPermissionStatus) geoPermissionStatus.textContent = message;
+    },
+    {
+      enableHighAccuracy: true,
+      timeout: 8000,
+      maximumAge: 60000,
+    }
+  );
 }
 
 async function fetchMyReports() {
@@ -864,7 +1363,7 @@ document.getElementById("report-form").addEventListener("submit", (event) => {
       reporter_device_id: deviceId,
       status: "active",
     };
-    const { error } = await supabase.from("incident_reports").insert(payload);
+    const { error } = await insertIncidentReport(payload);
     if (error) {
       showToast(error.message);
       return;
@@ -913,7 +1412,7 @@ document.getElementById("route-form").addEventListener("submit", (event) => {
 
 document
   .querySelector("[data-action='share-location']")
-  .addEventListener("click", () =>
+  ?.addEventListener("click", () =>
     showToast((copy[languageSelect.value] || copy.en).locationShared)
   );
 
@@ -1137,11 +1636,13 @@ async function initApp() {
   applyLanguage("en");
   setProfileDisplayName(state.currentProfileName);
   renderSimpleProfiles();
+  initializeMap();
   if (!isSupabaseConfigured) {
     renderIncidentFeed();
     renderMyReports();
     renderTrustedContacts();
     renderRouteHistory();
+    refreshMapDataFromIncidents();
     showToast(text("databaseDisabled"));
     return;
   }
@@ -1176,7 +1677,7 @@ async function initApp() {
       "postgres_changes",
       { event: "*", schema: "public", table: "incident_reports" },
       () => {
-        fetchIncidentFeed();
+        scheduleMapRefresh();
       }
     )
     .subscribe();
