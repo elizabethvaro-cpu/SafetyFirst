@@ -246,17 +246,30 @@ create table if not exists public.user_profiles (
 
 create table if not exists public.profiles (
   id uuid primary key default gen_random_uuid(),
+  user_id uuid references auth.users(id) on delete cascade,
   name text not null,
   email text not null,
-  created_at timestamptz not null default timezone('utc', now())
+  created_at timestamptz not null default timezone('utc', now()),
+  updated_at timestamptz not null default timezone('utc', now())
 );
 
 create index if not exists idx_user_profiles_user_id on public.user_profiles(user_id);
 create index if not exists idx_profiles_created_at on public.profiles(created_at desc);
+create unique index if not exists idx_profiles_user_id on public.profiles(user_id);
+
+alter table public.profiles
+add column if not exists user_id uuid references auth.users(id) on delete cascade;
+alter table public.profiles
+add column if not exists updated_at timestamptz not null default timezone('utc', now());
 
 drop trigger if exists trg_user_profiles_updated_at on public.user_profiles;
 create trigger trg_user_profiles_updated_at
 before update on public.user_profiles
+for each row execute procedure public.set_updated_at();
+
+drop trigger if exists trg_profiles_updated_at on public.profiles;
+create trigger trg_profiles_updated_at
+before update on public.profiles
 for each row execute procedure public.set_updated_at();
 
 alter table public.user_profiles enable row level security;
@@ -289,12 +302,20 @@ create policy "profiles_select_authenticated"
 on public.profiles
 for select
 to authenticated
-using (true);
+using (auth.uid() = user_id);
 
 drop policy if exists "profiles_insert_authenticated" on public.profiles;
 create policy "profiles_insert_authenticated"
 on public.profiles
 for insert
 to authenticated
-with check (true);
+with check (auth.uid() = user_id);
+
+drop policy if exists "profiles_update_authenticated" on public.profiles;
+create policy "profiles_update_authenticated"
+on public.profiles
+for update
+to authenticated
+using (auth.uid() = user_id)
+with check (auth.uid() = user_id);
 

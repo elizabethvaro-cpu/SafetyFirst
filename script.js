@@ -562,10 +562,11 @@ function renderSimpleProfiles() {
 }
 
 async function fetchSimpleProfiles() {
-  if (!supabase) return;
+  if (!supabase || !state.currentUserId) return;
   const { data, error } = await supabase
     .from("profiles")
     .select("id, name, email, created_at")
+    .eq("user_id", state.currentUserId)
     .order("created_at", { ascending: false })
     .limit(50);
 
@@ -581,8 +582,9 @@ async function fetchSimpleProfiles() {
 }
 
 async function saveSimpleProfile(name, email) {
-  if (!supabase) return false;
+  if (!supabase || !state.currentUserId) return false;
   const payload = {
+    user_id: state.currentUserId,
     name: (name || "").trim(),
     email: (email || "").trim(),
   };
