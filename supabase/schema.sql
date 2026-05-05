@@ -319,3 +319,92 @@ to authenticated
 using (auth.uid() = user_id)
 with check (auth.uid() = user_id);
 
+-- GPS community routing enhancements
+create table if not exists public.community_safe_routes (
+  id uuid primary key default gen_random_uuid(),
+  owner_user_id uuid not null references auth.users(id) on delete cascade,
+  owner_device_id text not null,
+  start_location text not null,
+  destination_location text not null,
+  route_notes text,
+  safety_level text not null check (safety_level in ('low', 'medium', 'high')),
+  safety_rating int not null check (safety_rating between 1 and 5),
+  tags text[] not null default '{}'::text[],
+  start_lat double precision,
+  start_lng double precision,
+  destination_lat double precision,
+  destination_lng double precision,
+  created_at timestamptz not null default timezone('utc', now()),
+  updated_at timestamptz not null default timezone('utc', now())
+);
+
+create table if not exists public.route_feedback (
+  id uuid primary key default gen_random_uuid(),
+  owner_user_id uuid not null references auth.users(id) on delete cascade,
+  owner_device_id text not null,
+  route_key text not null,
+  rating int not null check (rating between 1 and 5),
+  metadata jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default timezone('utc', now())
+);
+
+create index if not exists idx_community_safe_routes_owner_user_id
+  on public.community_safe_routes(owner_user_id);
+create index if not exists idx_community_safe_routes_created_at
+  on public.community_safe_routes(created_at desc);
+create index if not exists idx_route_feedback_owner_user_id
+  on public.route_feedback(owner_user_id);
+create index if not exists idx_route_feedback_created_at
+  on public.route_feedback(created_at desc);
+
+drop trigger if exists trg_community_safe_routes_updated_at on public.community_safe_routes;
+create trigger trg_community_safe_routes_updated_at
+before update on public.community_safe_routes
+for each row execute procedure public.set_updated_at();
+
+alter table public.community_safe_routes enable row level security;
+alter table public.route_feedback enable row level security;
+
+drop policy if exists "community_safe_routes_select_auth" on public.community_safe_routes;
+create policy "community_safe_routes_select_auth"
+on public.community_safe_routes
+for select
+to authenticated
+using (true);
+
+drop policy if exists "community_safe_routes_insert_own" on public.community_safe_routes;
+create policy "community_safe_routes_insert_own"
+on public.community_safe_routes
+for insert
+to authenticated
+with check (auth.uid() = owner_user_id);
+
+drop policy if exists "community_safe_routes_update_own" on public.community_safe_routes;
+create policy "community_safe_routes_update_own"
+on public.community_safe_routes
+for update
+to authenticated
+using (auth.uid() = owner_user_id)
+with check (auth.uid() = owner_user_id);
+
+drop policy if exists "community_safe_routes_delete_own" on public.community_safe_routes;
+create policy "community_safe_routes_delete_own"
+on public.community_safe_routes
+for delete
+to authenticated
+using (auth.uid() = owner_user_id);
+
+drop policy if exists "route_feedback_select_own" on public.route_feedback;
+create policy "route_feedback_select_own"
+on public.route_feedback
+for select
+to authenticated
+using (auth.uid() = owner_user_id);
+
+drop policy if exists "route_feedback_insert_own" on public.route_feedback;
+create policy "route_feedback_insert_own"
+on public.route_feedback
+for insert
+to authenticated
+with check (auth.uid() = owner_user_id);
+

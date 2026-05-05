@@ -48,6 +48,21 @@ const mapFilterType = document.getElementById("map-filter-type");
 const mapFilterSeverity = document.getElementById("map-filter-severity");
 const mapFilterBtn = document.getElementById("map-filter-btn");
 const mapAlertsBtn = document.getElementById("map-alerts-btn");
+const gpsMapContainer = document.getElementById("gps-live-map");
+const gpsMapHint = document.getElementById("gps-map-hint");
+const communityRouteForm = document.getElementById("community-route-form");
+const communityRouteList = document.getElementById("community-route-list");
+const routeOptionsContainer = document.getElementById("route-options");
+const routeForm = document.getElementById("route-form");
+const routeOriginInput = document.getElementById("origin");
+const routeDestinationInput = document.getElementById("destination");
+const routePreferenceInputs = [...document.querySelectorAll("#route-form fieldset input")];
+const communityRouteStartInput = document.getElementById("community-route-start");
+const communityRouteDestinationInput = document.getElementById("community-route-destination");
+const communityRouteNotesInput = document.getElementById("community-route-notes");
+const communityRouteSafetyLevelInput = document.getElementById("community-route-safety-level");
+const communityRouteRatingInput = document.getElementById("community-route-rating");
+const communityRouteTagsInput = document.getElementById("community-route-tags");
 
 const MAP_DEFAULT_CENTER = { lat: 40.7128, lng: -74.006 };
 const MAP_SEARCH_RADIUS_METERS = 1207;
@@ -56,6 +71,9 @@ const MAP_TIME_RANGE_TO_HOURS = {
   "7d": 24 * 7,
   "30d": 24 * 30,
 };
+const GPS_ROUTE_SAMPLE_POINTS = 24;
+const GPS_INCIDENT_PROXIMITY_METERS = 260;
+const GPS_DANGER_MARKER_LIMIT = 150;
 
 const labels = {
   map: "Safety Map",
@@ -92,6 +110,27 @@ const state = {
       severity: "all",
     },
     refreshTimeout: null,
+  },
+  gps: {
+    map: null,
+    userLatLng: null,
+    fromLatLng: null,
+    toLatLng: null,
+    userMarker: null,
+    fromMarker: null,
+    toMarker: null,
+    dangerMarkersLayer: null,
+    routePolylinesLayer: null,
+    communityRoutes: [],
+    routeChoices: [],
+    activeRouteId: null,
+    currentRouteRiskLevel: null,
+    schemaHasCommunityTables: true,
+    schemaHasRouteFeedbackTable: true,
+    clickStage: "from",
+    uiEventsBound: false,
+    routeRealtimeChannel: null,
+    communityRealtimeChannel: null,
   },
 };
 
@@ -644,6 +683,17 @@ function renderRouteHistory() {
         <div>
           <strong>${escapeHtml(route.origin)} → ${escapeHtml(route.destination)}</strong>
           <small>${escapeHtml(route.route_key)} • ${escapeHtml(route.risk_level)} • ${escapeHtml(route.eta_minutes)} min • ${escapeHtml(timeAgo(route.created_at))}</small>
+          <small class="route-feedback-note">Rate this suggested route:</small>
+          <div class="gps-route-rate">
+            ${[1, 2, 3, 4, 5]
+              .map(
+                (score) => `
+                  <button class="gps-rate-btn" data-action="rate-route" data-id="${route.id}" data-rating="${score}">
+                    ${score}
+                  </button>`
+              )
+              .join("")}
+          </div>
         </div>
         <div class="contact-actions">
           <button class="tiny-btn" data-action="toggle-route-favorite" data-id="${route.id}" data-favorite="${route.is_favorite}">
@@ -656,6 +706,715 @@ function renderRouteHistory() {
       </article>`
     )
     .join("");
+}
+
+function renderCommunityRoutes() {
+  if (!communityRouteList) return;
+  if (!state.gps.communityRoutes.length) {
+    communityRouteList.innerHTML = `<div class="empty-state">No community routes submitted yet.</div>`;
+    return;
+  }
+
+  communityRouteList.innerHTML = state.gps.communityRoutes
+    .slice(0, 8)
+    .map((route) => {
+      const tags = Array.isArray(route.tags) ? route.tags : [];
+      return `
+        <article class="community-route-item">
+          <strong>${escapeHtml(route.start_location)} → ${escapeHtml(route.destination_location)}</strong>
+          <p>${escapeHtml(route.safety_level)} risk • Rating ${escapeHtml(String(route.safety_rating || 0))}/5 • ${escapeHtml(timeAgo(route.created_at))}</p>
+          <p>${escapeHtml(route.route_notes || "No additional notes.")}</p>
+          <div class="community-route-tags">
+            ${tags.map((tag) => `<span class="community-route-tag">${escapeHtml(tag)}</span>`).join("")}
+          </div>
+          <div class="contact-actions" style="margin-top:0.45rem;">
+            <button class="tiny-btn" data-action="use-community-route" data-id="${route.id}">Use Route</button>
+          </div>
+        </article>`;
+    })
+    .join("");
+}
+
+function parseTagsInput(value) {
+  if (!value) return [];
+  const parts = String(value)
+    .split(",")
+    .map((item) => item.trim().toLowerCase())
+    .filter(Boolean);
+  return [...new Set(parts)];
+}
+
+function normalizeCommunityRoute(record) {
+  return {
+    id: record.id,
+    start_location: record.start_location || "",
+    destination_location: record.destination_location || "",
+    route_notes: record.route_notes || "",
+    safety_level: record.safety_level || "medium",
+    safety_rating: Number(record.safety_rating) || 3,
+    tags: Array.isArray(record.tags) ? record.tags : [],
+    created_at: record.created_at || new Date().toISOString(),
+    start_lat: Number(record.start_lat),
+    start_lng: Number(record.start_lng),
+    destination_lat: Number(record.destination_lat),
+    destination_lng: Number(record.destination_lng),
+  };
+}
+
+function safeSetLatLng(layer, latlng) {
+  if (!layer || !latlng) return;
+  if (typeof layer.setLatLng === "function") {
+    layer.setLatLng(latlng);
+  }
+}
+
+function mapGpsRiskLabel(riskLevel) {
+  if (riskLevel === "low") return "Low Risk";
+  if (riskLevel === "high") return "High Risk";
+  return "Medium Risk";
+}
+
+function mapGpsRiskClass(riskLevel) {
+  if (riskLevel === "low") return "low-risk";
+  if (riskLevel === "high") return "high-risk";
+  return "medium-risk";
+}
+
+function mapGpsRouteColor(riskLevel) {
+  if (riskLevel === "low") return "#16a34a";
+  if (riskLevel === "high") return "#dc2626";
+  return "#eab308";
+}
+
+function formatGpsLatLng(latlng) {
+  if (!latlng) return "";
+  return `${latlng.lat.toFixed(4)}, ${latlng.lng.toFixed(4)}`;
+}
+
+function getGpsPreferenceWeights() {
+  return {
+    wellLit: Boolean(routePreferenceInputs[0]?.checked),
+    avoidIsolated: Boolean(routePreferenceInputs[1]?.checked),
+    avoidTraffic: Boolean(routePreferenceInputs[2]?.checked),
+  };
+}
+
+function resolveGpsPoint(inputValue, fallbackSeed) {
+  const textValue = (inputValue || "").trim();
+  const coordsMatch = textValue.match(
+    /^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/
+  );
+  if (coordsMatch) {
+    return {
+      lat: Number(coordsMatch[1]),
+      lng: Number(coordsMatch[2]),
+    };
+  }
+  return deriveCoordinatesFromSeed(textValue || fallbackSeed || "gps-point");
+}
+
+function updateGpsHint(message) {
+  if (!gpsMapHint) return;
+  if (message) {
+    gpsMapHint.textContent = message;
+    return;
+  }
+  if (!state.gps.fromLatLng) {
+    gpsMapHint.textContent = "Tap map to set From point.";
+    return;
+  }
+  if (!state.gps.toLatLng) {
+    gpsMapHint.textContent = "Tap map to set To point.";
+    return;
+  }
+  gpsMapHint.textContent = "Tap markers or route cards to inspect safety.";
+}
+
+function interpolateRoute(start, control, end, samples = GPS_ROUTE_SAMPLE_POINTS) {
+  const points = [];
+  for (let index = 0; index <= samples; index += 1) {
+    const t = index / samples;
+    const oneMinusT = 1 - t;
+    const lat =
+      oneMinusT * oneMinusT * start.lat +
+      2 * oneMinusT * t * control.lat +
+      t * t * end.lat;
+    const lng =
+      oneMinusT * oneMinusT * start.lng +
+      2 * oneMinusT * t * control.lng +
+      t * t * end.lng;
+    points.push({ lat, lng });
+  }
+  return points;
+}
+
+function buildRoutePath(start, destination, offsetScale = 0) {
+  const mid = {
+    lat: (start.lat + destination.lat) / 2,
+    lng: (start.lng + destination.lng) / 2,
+  };
+  const vectorLat = destination.lat - start.lat;
+  const vectorLng = destination.lng - start.lng;
+  const length = Math.max(Math.sqrt(vectorLat * vectorLat + vectorLng * vectorLng), 0.00001);
+  const perpendicular = {
+    lat: -vectorLng / length,
+    lng: vectorLat / length,
+  };
+  const control = {
+    lat: mid.lat + perpendicular.lat * offsetScale,
+    lng: mid.lng + perpendicular.lng * offsetScale,
+  };
+  return interpolateRoute(start, control, destination);
+}
+
+function computeRouteDistanceMeters(path) {
+  if (!path?.length) return 0;
+  let total = 0;
+  for (let index = 1; index < path.length; index += 1) {
+    total += distanceMeters(path[index - 1].lat, path[index - 1].lng, path[index].lat, path[index].lng);
+  }
+  return total;
+}
+
+function computeRouteSafetyMetrics(path, preferences) {
+  const incidents = state.incidents.filter((item) => item.status === "active");
+  let weightedRisk = 0;
+  let nearbyIncidents = 0;
+  const now = Date.now();
+
+  path.forEach((point) => {
+    incidents.forEach((incident) => {
+      if (!Number.isFinite(incident.mapLat) || !Number.isFinite(incident.mapLng)) return;
+      const distance = distanceMeters(point.lat, point.lng, incident.mapLat, incident.mapLng);
+      if (distance > GPS_INCIDENT_PROXIMITY_METERS) return;
+      nearbyIncidents += 1;
+      const severityWeight =
+        incident.severity === "critical"
+          ? 4.5
+          : incident.severity === "high"
+            ? 3.2
+            : incident.severity === "medium"
+              ? 2
+              : 1;
+      const incidentAgeDays = Math.max(
+        0,
+        (now - new Date(incident.created_at || now).getTime()) / (24 * 60 * 60 * 1000)
+      );
+      const recencyFactor = Math.max(0.2, 1 - incidentAgeDays / 30);
+      const proximityFactor = Math.max(0.35, 1 - distance / GPS_INCIDENT_PROXIMITY_METERS);
+      weightedRisk += severityWeight * recencyFactor * proximityFactor;
+    });
+  });
+
+  const preferenceBoost =
+    (preferences.wellLit ? 8 : 0) +
+    (preferences.avoidIsolated ? 10 : 0) +
+    (preferences.avoidTraffic ? 4 : 0);
+
+  const communityBoost = state.gps.communityRoutes.reduce((accumulator, route) => {
+    const levelBoost =
+      route.safety_level === "low" ? 6 : route.safety_level === "medium" ? 2 : -3;
+    const ratingBoost = (Number(route.safety_rating) || 0) * 0.8;
+    return accumulator + levelBoost + ratingBoost;
+  }, 0);
+
+  const score = Math.max(0, Math.min(100, Math.round(100 - weightedRisk * 5 + preferenceBoost + communityBoost * 0.08)));
+  const riskLevel = score >= 72 ? "low" : score >= 48 ? "medium" : "high";
+
+  return {
+    score,
+    riskLevel,
+    weightedRisk,
+    nearbyIncidents,
+  };
+}
+
+function buildRouteOption({ id, title, path, speedBiasMinutes = 0, safetyBias = 0, preferences }) {
+  const metrics = computeRouteSafetyMetrics(path, preferences);
+  const distanceKm = computeRouteDistanceMeters(path) / 1000;
+  const baseMinutes = Math.max(7, Math.round(distanceKm * 12));
+  const etaMinutes = Math.max(5, baseMinutes + speedBiasMinutes);
+  const adjustedScore = Math.max(0, Math.min(100, metrics.score + safetyBias));
+  const riskLevel = adjustedScore >= 72 ? "low" : adjustedScore >= 48 ? "medium" : "high";
+
+  return {
+    id,
+    routeKey: id,
+    title,
+    path,
+    score: adjustedScore,
+    riskLevel,
+    etaMinutes,
+    nearbyIncidents: metrics.nearbyIncidents,
+  };
+}
+
+function setGpsRouteSelection(routeId) {
+  const selected =
+    state.gps.routeChoices.find((route) => route.id === routeId) ||
+    state.gps.routeChoices[0] ||
+    null;
+  if (!selected) return;
+  state.gps.activeRouteId = selected.id;
+  state.gps.currentRouteRiskLevel = selected.riskLevel;
+  state.selectedRouteKey = selected.routeKey;
+  renderGpsRouteOptions();
+  syncLegacyRouteSelection();
+  drawGpsRoutesOnMap();
+}
+
+function drawGpsRoutesOnMap() {
+  if (!state.gps.map || !state.gps.routePolylinesLayer) return;
+  state.gps.routePolylinesLayer.clearLayers();
+  state.gps.routeChoices.forEach((route) => {
+    const isActive = route.id === state.gps.activeRouteId;
+    const polyline = L.polyline(route.path, {
+      color: mapGpsRouteColor(route.riskLevel),
+      weight: isActive ? 5 : 3.5,
+      opacity: isActive ? 0.9 : 0.55,
+      dashArray: isActive ? null : "6 5",
+    });
+    polyline.addTo(state.gps.routePolylinesLayer);
+  });
+}
+
+function renderGpsRouteOptions() {
+  if (!routeOptionsContainer) return;
+  if (!state.gps.routeChoices.length) {
+    routeOptionsContainer.innerHTML = `
+      <button type="button" class="route-option active" data-route-key="A">
+        <strong data-i18n="routeOptionOne">Route A</strong>
+        <small data-i18n="routeOptionOneMeta">14 min • Low risk</small>
+      </button>
+      <button type="button" class="route-option" data-route-key="B">
+        <strong data-i18n="routeOptionTwo">Route B</strong>
+        <small data-i18n="routeOptionTwoMeta">11 min • Medium risk</small>
+      </button>`;
+    syncLegacyRouteSelection();
+    return;
+  }
+  routeOptionsContainer.innerHTML = state.gps.routeChoices
+    .map((route) => {
+      const activeClass = route.id === state.gps.activeRouteId ? "active" : "";
+      const riskClass = mapGpsRiskClass(route.riskLevel);
+      const recommendedClass = route.id === state.gps.routeChoices[0]?.id ? "recommended" : "";
+      return `
+        <article class="route-option ${activeClass} ${riskClass} ${recommendedClass}">
+          <button type="button" class="tiny-btn" data-action="select-gps-route" data-route-id="${route.id}" data-route-key="${route.routeKey}">
+            Select
+          </button>
+          <strong>${escapeHtml(route.title)}</strong>
+          <small>${route.etaMinutes} min • ${escapeHtml(mapGpsRiskLabel(route.riskLevel))} • Score ${route.score}</small>
+          <small class="route-status-note">${route.nearbyIncidents} nearby alerts on this path</small>
+          <div class="gps-route-rate">
+            <button type="button" class="gps-rate-btn" data-action="rate-gps-route" data-route-id="${route.id}" data-rating="5">Rate 5</button>
+            <button type="button" class="gps-rate-btn" data-action="rate-gps-route" data-route-id="${route.id}" data-rating="4">Rate 4</button>
+            <button type="button" class="gps-rate-btn" data-action="rate-gps-route" data-route-id="${route.id}" data-rating="3">Rate 3</button>
+          </div>
+        </article>`;
+    })
+    .join("");
+  syncLegacyRouteSelection();
+}
+
+function syncLegacyRouteSelection() {
+  if (!routeOptionsContainer) return;
+  routeOptionsContainer.querySelectorAll(".route-option").forEach((option) => {
+    if (!(option instanceof HTMLElement)) return;
+    const routeKey = option.dataset.routeKey || option.dataset.routeId;
+    option.classList.toggle("active", routeKey === state.selectedRouteKey);
+  });
+}
+
+function setGpsWaypoint(latlng, pointType) {
+  if (!latlng || !state.gps.map) return;
+  if (pointType === "from") {
+    state.gps.fromLatLng = latlng;
+    routeOriginInput.value = formatGpsLatLng(latlng);
+    if (!state.gps.fromMarker) {
+      state.gps.fromMarker = L.marker(latlng, {
+        icon: L.divIcon({
+          className: "gps-waypoint-pin-wrap",
+          html: `<span class="gps-waypoint-pin start"></span>`,
+          iconSize: [14, 14],
+          iconAnchor: [7, 7],
+        }),
+      }).addTo(state.gps.map);
+    } else {
+      safeSetLatLng(state.gps.fromMarker, latlng);
+    }
+    state.gps.clickStage = "to";
+    updateGpsHint("To point set. Tap map to set destination.");
+    return;
+  }
+
+  state.gps.toLatLng = latlng;
+  routeDestinationInput.value = formatGpsLatLng(latlng);
+  if (!state.gps.toMarker) {
+    state.gps.toMarker = L.marker(latlng, {
+      icon: L.divIcon({
+        className: "gps-waypoint-pin-wrap",
+        html: `<span class="gps-waypoint-pin destination"></span>`,
+        iconSize: [14, 14],
+        iconAnchor: [7, 7],
+      }),
+    }).addTo(state.gps.map);
+  } else {
+    safeSetLatLng(state.gps.toMarker, latlng);
+  }
+  state.gps.clickStage = "from";
+  updateGpsHint();
+}
+
+function ensureGpsDangerMarkers() {
+  if (!state.gps.map || !state.gps.dangerMarkersLayer) return;
+  state.gps.dangerMarkersLayer.clearLayers();
+  const incidents = state.incidents
+    .filter((incident) => incident.status === "active")
+    .slice(0, GPS_DANGER_MARKER_LIMIT);
+
+  incidents.forEach((incident) => {
+    if (!Number.isFinite(incident.mapLat) || !Number.isFinite(incident.mapLng)) return;
+    L.marker(
+      { lat: incident.mapLat, lng: incident.mapLng },
+      {
+        icon: L.divIcon({
+          className: "gps-danger-pin-wrap",
+          html: `<span class="gps-danger-pin"></span>`,
+          iconSize: [12, 12],
+          iconAnchor: [6, 6],
+        }),
+      }
+    )
+      .bindPopup(
+        `<strong>${escapeHtml(incident.incident_type || "Incident")}</strong><br>${escapeHtml(
+          incident.details || "No details"
+        )}`
+      )
+      .addTo(state.gps.dangerMarkersLayer);
+  });
+}
+
+function evaluateCurrentRouteSafety() {
+  const active = state.gps.routeChoices.find((route) => route.id === state.gps.activeRouteId);
+  if (!active) return;
+  if (active.riskLevel === "high" && state.gps.currentRouteRiskLevel !== "high") {
+    showToast("Safety alert: active route risk increased. Consider safer option.");
+    updateGpsHint("Warning: current route now has high risk.");
+  }
+  state.gps.currentRouteRiskLevel = active.riskLevel;
+}
+
+function refreshGpsWithIncidents() {
+  ensureGpsDangerMarkers();
+  if (state.gps.fromLatLng && state.gps.toLatLng) {
+    generateGpsRoutes({ persistHistory: false, silent: true });
+  }
+  evaluateCurrentRouteSafety();
+}
+
+function generateGpsRoutes(options = {}) {
+  const fromPoint = state.gps.fromLatLng || resolveGpsPoint(routeOriginInput.value, "route-origin");
+  const toPoint = state.gps.toLatLng || resolveGpsPoint(routeDestinationInput.value, "route-destination");
+  state.gps.fromLatLng = fromPoint;
+  state.gps.toLatLng = toPoint;
+  setGpsWaypoint(fromPoint, "from");
+  setGpsWaypoint(toPoint, "to");
+
+  const preferences = getGpsPreferenceWeights();
+  const baseDistance = distanceMeters(fromPoint.lat, fromPoint.lng, toPoint.lat, toPoint.lng);
+  const offset = Math.max(0.01, (baseDistance / 1000) * 0.018);
+  const routeA = buildRouteOption({
+    id: "A",
+    title: "Route A",
+    path: buildRoutePath(fromPoint, toPoint, offset),
+    speedBiasMinutes: 2,
+    safetyBias: 6,
+    preferences,
+  });
+  const routeB = buildRouteOption({
+    id: "B",
+    title: "Route B",
+    path: buildRoutePath(fromPoint, toPoint, -offset * 0.6),
+    speedBiasMinutes: 0,
+    safetyBias: 0,
+    preferences,
+  });
+  const routeC = buildRouteOption({
+    id: "C",
+    title: "Route C",
+    path: buildRoutePath(fromPoint, toPoint, 0),
+    speedBiasMinutes: -2,
+    safetyBias: -5,
+    preferences,
+  });
+
+  state.gps.routeChoices = [routeA, routeB, routeC].sort((left, right) => right.score - left.score);
+  setGpsRouteSelection(state.gps.routeChoices[0]?.id || "A");
+  updateGpsHint();
+  if (!options.silent) {
+    showToast("Safety routes generated.");
+  }
+}
+
+async function fetchCommunityRoutes() {
+  if (!supabase || !state.currentUserId || !state.gps.schemaHasCommunityTables) {
+    renderCommunityRoutes();
+    return;
+  }
+  const { data, error } = await supabase
+    .from("community_safe_routes")
+    .select(
+      "id, start_location, destination_location, route_notes, safety_level, safety_rating, tags, created_at, start_lat, start_lng, destination_lat, destination_lng"
+    )
+    .order("created_at", { ascending: false })
+    .limit(50);
+
+  if (error) {
+    if (error.code === "42P01") {
+      state.gps.schemaHasCommunityTables = false;
+      state.gps.communityRoutes = [];
+      renderCommunityRoutes();
+      return;
+    }
+    showToast(error.message);
+    return;
+  }
+  state.gps.communityRoutes = (data || []).map(normalizeCommunityRoute);
+  renderCommunityRoutes();
+}
+
+async function saveCommunityRoute(payload) {
+  if (!supabase || !state.currentUserId || !state.gps.schemaHasCommunityTables) return false;
+  const { error } = await supabase.from("community_safe_routes").insert(payload);
+  if (error) {
+    if (error.code === "42P01") {
+      state.gps.schemaHasCommunityTables = false;
+      showToast("Community routes table missing. Run latest SQL schema.");
+      return false;
+    }
+    showToast(error.message);
+    return false;
+  }
+  return true;
+}
+
+async function saveRouteFeedback(routeId, rating) {
+  if (!supabase || !state.currentUserId || !state.gps.schemaHasRouteFeedbackTable) return false;
+  const { error } = await supabase.from("route_feedback").insert({
+    owner_user_id: state.currentUserId,
+    owner_device_id: deviceId,
+    route_key: routeId,
+    rating,
+    metadata: {
+      from: routeOriginInput.value.trim(),
+      destination: routeDestinationInput.value.trim(),
+      generated_at: new Date().toISOString(),
+    },
+  });
+
+  if (error) {
+    if (error.code === "42P01") {
+      state.gps.schemaHasRouteFeedbackTable = false;
+      showToast("Route feedback table missing. Run latest SQL schema.");
+      return false;
+    }
+    showToast(error.message);
+    return false;
+  }
+  return true;
+}
+
+function bindGpsMapEvents() {
+  if (!state.gps.map || state.gps.mapEventsBound) return;
+  state.gps.map.on("click", (event) => {
+    const stage = state.gps.clickStage === "to" ? "to" : "from";
+    setGpsWaypoint(event.latlng, stage);
+    if (state.gps.fromLatLng && state.gps.toLatLng) {
+      generateGpsRoutes({ persistHistory: false, silent: true });
+    }
+  });
+  state.gps.mapEventsBound = true;
+}
+
+function ensureGpsMap() {
+  if (!gpsMapContainer || state.gps.map) return;
+  const mapInstance = L.map(gpsMapContainer, {
+    zoomControl: false,
+    attributionControl: false,
+  }).setView([MAP_DEFAULT_CENTER.lat, MAP_DEFAULT_CENTER.lng], 12);
+  state.gps.map = mapInstance;
+  state.gps.dangerMarkersLayer = L.layerGroup().addTo(mapInstance);
+  state.gps.routePolylinesLayer = L.layerGroup().addTo(mapInstance);
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19,
+  }).addTo(mapInstance);
+  bindGpsMapEvents();
+  setTimeout(() => mapInstance.invalidateSize(), 0);
+  updateGpsHint();
+
+  if (!navigator.geolocation) return;
+  navigator.geolocation.getCurrentPosition(
+    (position) => {
+      const latlng = { lat: position.coords.latitude, lng: position.coords.longitude };
+      state.gps.userLatLng = latlng;
+      if (!state.gps.userMarker) {
+        state.gps.userMarker = L.circleMarker(latlng, {
+          radius: 6,
+          color: "#2563eb",
+          fillColor: "#2563eb",
+          fillOpacity: 0.8,
+          weight: 2,
+        }).addTo(mapInstance);
+      } else {
+        safeSetLatLng(state.gps.userMarker, latlng);
+      }
+      if (!state.gps.fromLatLng) {
+        setGpsWaypoint(latlng, "from");
+      }
+    },
+    () => {},
+    { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 }
+  );
+}
+
+function bindGpsUiEvents() {
+  const gpsRouteOptionsBound = routeOptionsContainer?.dataset.gpsBound === "true";
+  const gpsCommunitySubmitBound = communityRouteForm?.dataset.gpsBound === "true";
+  const gpsCommunityListBound = communityRouteList?.dataset.gpsBound === "true";
+
+  if (!gpsRouteOptionsBound) {
+    if (routeOptionsContainer) routeOptionsContainer.dataset.gpsBound = "true";
+    routeOptionsContainer?.addEventListener("click", async (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) return;
+      const selectButton = target.closest("[data-action='select-gps-route']");
+      if (selectButton instanceof HTMLElement) {
+        const routeId = selectButton.dataset.routeId;
+        if (routeId) setGpsRouteSelection(routeId);
+      }
+
+      const rateButton = target.closest(".gps-rate-btn");
+      if (rateButton instanceof HTMLElement && rateButton.dataset.action === "rate-gps-route") {
+        if (!hasDatabaseSession()) return;
+        const routeId = rateButton.dataset.routeId;
+        const rating = Number(rateButton.dataset.rating);
+        if (!routeId || !Number.isFinite(rating)) return;
+        const saved = await saveRouteFeedback(routeId, rating);
+        if (saved) showToast("Thanks for rating this route.");
+      }
+    });
+  }
+
+  if (!gpsCommunitySubmitBound) {
+    if (communityRouteForm) communityRouteForm.dataset.gpsBound = "true";
+    communityRouteForm?.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      if (!hasDatabaseSession()) return;
+
+      const startLocation = communityRouteStartInput?.value.trim() || "";
+      const destinationLocation = communityRouteDestinationInput?.value.trim() || "";
+      if (!startLocation || !destinationLocation) {
+        showToast("Please provide start and destination.");
+        return;
+      }
+
+      const payload = {
+        owner_user_id: state.currentUserId,
+        owner_device_id: deviceId,
+        start_location: startLocation,
+        destination_location: destinationLocation,
+        route_notes: communityRouteNotesInput?.value.trim() || null,
+        safety_level: communityRouteSafetyLevelInput?.value || "medium",
+        safety_rating: Number(communityRouteRatingInput?.value || 3),
+        tags: parseTagsInput(communityRouteTagsInput?.value || ""),
+        start_lat: Number(state.gps.fromLatLng?.lat ?? resolveGpsPoint(startLocation, "community-start").lat),
+        start_lng: Number(state.gps.fromLatLng?.lng ?? resolveGpsPoint(startLocation, "community-start").lng),
+        destination_lat: Number(
+          state.gps.toLatLng?.lat ?? resolveGpsPoint(destinationLocation, "community-destination").lat
+        ),
+        destination_lng: Number(
+          state.gps.toLatLng?.lng ?? resolveGpsPoint(destinationLocation, "community-destination").lng
+        ),
+      };
+
+      const saved = await saveCommunityRoute(payload);
+      if (!saved) return;
+      communityRouteForm.reset();
+      if (communityRouteRatingInput) communityRouteRatingInput.value = "4";
+      if (communityRouteSafetyLevelInput) communityRouteSafetyLevelInput.value = "low";
+      await fetchCommunityRoutes();
+      if (state.gps.fromLatLng && state.gps.toLatLng) {
+        generateGpsRoutes({ silent: true });
+      }
+      showToast("Community route submitted.");
+    });
+  }
+
+  if (!gpsCommunityListBound) {
+    if (communityRouteList) communityRouteList.dataset.gpsBound = "true";
+    communityRouteList?.addEventListener("click", (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) return;
+      if (target.dataset.action !== "use-community-route") return;
+      const routeId = target.dataset.id;
+      if (!routeId) return;
+      const route = state.gps.communityRoutes.find((item) => item.id === routeId);
+      if (!route) return;
+      routeOriginInput.value = route.start_location;
+      routeDestinationInput.value = route.destination_location;
+      if (Number.isFinite(route.start_lat) && Number.isFinite(route.start_lng)) {
+        state.gps.fromLatLng = { lat: route.start_lat, lng: route.start_lng };
+      } else {
+        state.gps.fromLatLng = resolveGpsPoint(route.start_location, "community-start");
+      }
+      if (Number.isFinite(route.destination_lat) && Number.isFinite(route.destination_lng)) {
+        state.gps.toLatLng = { lat: route.destination_lat, lng: route.destination_lng };
+      } else {
+        state.gps.toLatLng = resolveGpsPoint(route.destination_location, "community-destination");
+      }
+      if (state.gps.map) {
+        setGpsWaypoint(state.gps.fromLatLng, "from");
+        setGpsWaypoint(state.gps.toLatLng, "to");
+      }
+      generateGpsRoutes({ silent: true });
+      showToast("Community route applied.");
+    });
+  }
+}
+
+async function subscribeGpsRealtime() {
+  if (!supabase) return;
+  if (state.gps.routeRealtimeChannel) {
+    await supabase.removeChannel(state.gps.routeRealtimeChannel);
+  }
+  if (state.gps.communityRealtimeChannel) {
+    await supabase.removeChannel(state.gps.communityRealtimeChannel);
+  }
+
+  state.gps.routeRealtimeChannel = supabase
+    .channel("gps-route-history-live")
+    .on(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "route_history" },
+      () => {
+        fetchRouteHistory();
+      }
+    )
+    .subscribe();
+
+  if (state.gps.schemaHasCommunityTables) {
+    state.gps.communityRealtimeChannel = supabase
+      .channel("gps-community-routes-live")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "community_safe_routes" },
+        () => {
+          fetchCommunityRoutes();
+        }
+      )
+      .subscribe();
+  }
 }
 
 function renderSimpleProfiles() {
@@ -773,6 +1532,7 @@ async function fetchIncidentFeed() {
   state.incidents = (data || []).map(normalizeIncident);
   renderIncidentFeed();
   refreshMapDataFromIncidents();
+  refreshGpsWithIncidents();
 }
 
 function getIncidentCutoffDate() {
@@ -1378,37 +2138,65 @@ document.getElementById("report-form").addEventListener("submit", (event) => {
   })();
 });
 
-document.getElementById("route-form").addEventListener("submit", (event) => {
+const routeFormAlreadyBound = routeForm?.dataset.routeSubmitBound === "true";
+if (!routeFormAlreadyBound) {
+  if (routeForm) routeForm.dataset.routeSubmitBound = "true";
+  routeForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
   if (!hasDatabaseSession()) {
     return;
   }
-  (async () => {
-    const routeA = { eta: 14, risk: "low" };
-    const routeB = { eta: 11, risk: "medium" };
-    const routeMeta = state.selectedRouteKey === "B" ? routeB : routeA;
-    const { error } = await supabase.from("route_history").insert({
-      owner_user_id: state.currentUserId,
-      owner_device_id: deviceId,
-      origin: document.getElementById("origin").value.trim(),
-      destination: document.getElementById("destination").value.trim(),
-      route_key: state.selectedRouteKey,
-      risk_level: routeMeta.risk,
-      eta_minutes: routeMeta.eta,
-      options: {
-        well_lit: document.querySelectorAll("#route-form fieldset input")[0].checked,
-        avoid_isolated: document.querySelectorAll("#route-form fieldset input")[1].checked,
-        avoid_traffic: document.querySelectorAll("#route-form fieldset input")[2].checked,
-      },
-    });
-    if (error) {
-      showToast(error.message);
-      return;
-    }
-    await fetchRouteHistory();
-    showToast(text("routeSaved"));
-  })();
-});
+
+  const originValue = routeOriginInput?.value.trim() || "";
+  const destinationValue = routeDestinationInput?.value.trim() || "";
+  if (!originValue || !destinationValue) {
+    showToast("Please provide both start and destination.");
+    return;
+  }
+
+  state.gps.fromLatLng = resolveGpsPoint(originValue, "route-origin");
+  state.gps.toLatLng = resolveGpsPoint(destinationValue, "route-destination");
+  if (state.gps.map) {
+    setGpsWaypoint(state.gps.fromLatLng, "from");
+    setGpsWaypoint(state.gps.toLatLng, "to");
+  }
+
+  generateGpsRoutes({ silent: true });
+  const selectedRoute =
+    state.gps.routeChoices.find((route) => route.id === state.gps.activeRouteId) ||
+    state.gps.routeChoices[0];
+  if (!selectedRoute) {
+    showToast("Unable to generate routes.");
+    return;
+  }
+
+  const payload = {
+    owner_user_id: state.currentUserId,
+    owner_device_id: deviceId,
+    origin: originValue,
+    destination: destinationValue,
+    route_key: selectedRoute.routeKey === "A" ? "A" : "B",
+    risk_level: selectedRoute.riskLevel,
+    eta_minutes: selectedRoute.etaMinutes,
+    options: {
+      well_lit: Boolean(routePreferenceInputs[0]?.checked),
+      avoid_isolated: Boolean(routePreferenceInputs[1]?.checked),
+      avoid_traffic: Boolean(routePreferenceInputs[2]?.checked),
+      gps_route_score: selectedRoute.score,
+      gps_route_incidents: selectedRoute.nearbyIncidents,
+    },
+  };
+
+  const { error } = await supabase.from("route_history").insert(payload);
+  if (error) {
+    showToast(error.message);
+    return;
+  }
+
+  await fetchRouteHistory();
+  showToast("Safety routes generated.");
+  });
+}
 
 document
   .querySelector("[data-action='share-location']")
@@ -1569,10 +2357,29 @@ trustedContactsList.addEventListener("click", async (event) => {
 routeHistoryList.addEventListener("click", async (event) => {
   const target = event.target;
   if (!(target instanceof HTMLElement)) return;
-  const id = target.dataset.id;
-  if (!id || !supabase) return;
+  if (!supabase) return;
 
-  if (target.dataset.action === "delete-route") {
+  const rateButton = target.closest("[data-action='rate-route']");
+  if (rateButton instanceof HTMLElement) {
+    if (!hasDatabaseSession()) {
+      return;
+    }
+    const routeId = rateButton.dataset.id;
+    const rating = Number(rateButton.dataset.rating);
+    if (!routeId || !Number.isFinite(rating)) return;
+    const saved = await saveRouteFeedback(routeId, rating);
+    if (saved) {
+      showToast("Thanks for rating this route.");
+    }
+    return;
+  }
+
+  const actionTarget = target.closest("[data-action]");
+  if (!(actionTarget instanceof HTMLElement)) return;
+  const id = actionTarget.dataset.id;
+  if (!id) return;
+
+  if (actionTarget.dataset.action === "delete-route") {
     const { error } = await supabase
       .from("route_history")
       .delete()
@@ -1586,8 +2393,8 @@ routeHistoryList.addEventListener("click", async (event) => {
     showToast(text("routeDeleted"));
   }
 
-  if (target.dataset.action === "toggle-route-favorite") {
-    const nextFavorite = target.dataset.favorite !== "true";
+  if (actionTarget.dataset.action === "toggle-route-favorite") {
+    const nextFavorite = actionTarget.dataset.favorite !== "true";
     const { error } = await supabase
       .from("route_history")
       .update({ is_favorite: nextFavorite })
@@ -1624,6 +2431,8 @@ trustedContactForm.addEventListener("submit", async (event) => {
   showToast(text("contactSaved"));
 });
 
+bindGpsUiEvents();
+
 themeSelect.addEventListener("change", () => {
   document.body.classList.toggle("dark", themeSelect.value === "dark");
 });
@@ -1637,12 +2446,15 @@ async function initApp() {
   setProfileDisplayName(state.currentProfileName);
   renderSimpleProfiles();
   initializeMap();
+  ensureGpsMap();
   if (!isSupabaseConfigured) {
     renderIncidentFeed();
     renderMyReports();
     renderTrustedContacts();
     renderRouteHistory();
+    renderCommunityRoutes();
     refreshMapDataFromIncidents();
+    refreshGpsWithIncidents();
     showToast(text("databaseDisabled"));
     return;
   }
@@ -1668,8 +2480,12 @@ async function initApp() {
     fetchMyReports(),
     fetchTrustedContacts(),
     fetchRouteHistory(),
+    fetchCommunityRoutes(),
     fetchLastSosEvent(),
   ]);
+
+  refreshGpsWithIncidents();
+  await subscribeGpsRealtime();
 
   supabase
     .channel("incidents-live-feed")

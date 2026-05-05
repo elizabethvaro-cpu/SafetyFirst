@@ -204,11 +204,13 @@
 
         <section class="page" id="page-gps" data-page="gps">
           <section class="route-map card">
+            <div id="gps-live-map" aria-label="GPS route map"></div>
             <div class="route-dot start"></div>
             <div class="route-dot end"></div>
             <div class="route-line"></div>
             <div class="route-badge start" data-i18n="fromShort">From</div>
             <div class="route-badge end" data-i18n="toShort">To</div>
+            <div class="gps-map-hint" id="gps-map-hint">Tap map to set From and To points.</div>
           </section>
 
           <form class="card form-card" id="route-form">
@@ -248,6 +250,63 @@
               <span data-i18n="findSafeRoute">Find Safest Route</span>
             </button>
           </form>
+
+          <section class="card form-card" id="community-route-card">
+            <h2>Community Safe Route</h2>
+            <form id="community-route-form" class="stack">
+              <label for="community-route-start">Start location</label>
+              <input
+                id="community-route-start"
+                type="text"
+                placeholder="Where did you start?"
+                required
+              />
+
+              <label for="community-route-destination">Destination</label>
+              <input
+                id="community-route-destination"
+                type="text"
+                placeholder="Where did you end?"
+                required
+              />
+
+              <label for="community-route-notes">Route description (optional)</label>
+              <textarea
+                id="community-route-notes"
+                rows="3"
+                placeholder="Any notes about why this route felt safe?"
+              ></textarea>
+
+              <label for="community-route-safety-level">Safety level</label>
+              <select id="community-route-safety-level" required>
+                <option value="low">Low risk</option>
+                <option value="medium">Medium risk</option>
+                <option value="high">High risk</option>
+              </select>
+
+              <label for="community-route-rating">Safety rating (1-5)</label>
+              <input
+                id="community-route-rating"
+                type="number"
+                min="1"
+                max="5"
+                step="1"
+                value="4"
+                required
+              />
+
+              <label for="community-route-tags">Tags (comma separated)</label>
+              <input
+                id="community-route-tags"
+                type="text"
+                placeholder="well-lit, busy area, police presence"
+              />
+
+              <button class="soft-btn" type="submit">Submit Community Route</button>
+            </form>
+
+            <div class="stack" id="community-route-list"></div>
+          </section>
 
           <section class="card stack">
             <div class="card-head">
