@@ -244,7 +244,15 @@ create table if not exists public.user_profiles (
   updated_at timestamptz not null default timezone('utc', now())
 );
 
+create table if not exists public.profiles (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  email text not null,
+  created_at timestamptz not null default timezone('utc', now())
+);
+
 create index if not exists idx_user_profiles_user_id on public.user_profiles(user_id);
+create index if not exists idx_profiles_created_at on public.profiles(created_at desc);
 
 drop trigger if exists trg_user_profiles_updated_at on public.user_profiles;
 create trigger trg_user_profiles_updated_at
@@ -252,6 +260,7 @@ before update on public.user_profiles
 for each row execute procedure public.set_updated_at();
 
 alter table public.user_profiles enable row level security;
+alter table public.profiles enable row level security;
 
 drop policy if exists "user_profiles_select_own" on public.user_profiles;
 create policy "user_profiles_select_own"
@@ -274,4 +283,18 @@ for update
 to authenticated
 using (auth.uid() = user_id)
 with check (auth.uid() = user_id);
+
+drop policy if exists "profiles_select_authenticated" on public.profiles;
+create policy "profiles_select_authenticated"
+on public.profiles
+for select
+to authenticated
+using (true);
+
+drop policy if exists "profiles_insert_authenticated" on public.profiles;
+create policy "profiles_insert_authenticated"
+on public.profiles
+for insert
+to authenticated
+with check (true);
 

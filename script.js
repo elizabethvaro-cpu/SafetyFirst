@@ -28,6 +28,10 @@ const profileEditorCard = document.getElementById("profile-editor-card");
 const profileForm = document.getElementById("profile-form");
 const profileNameInput = document.getElementById("profile-name-input");
 const cancelProfileEditBtn = document.getElementById("cancel-profile-edit");
+const simpleProfileForm = document.getElementById("simple-profile-form");
+const simpleProfileNameInput = document.getElementById("simple-profile-name");
+const simpleProfileEmailInput = document.getElementById("simple-profile-email");
+const simpleProfilesList = document.getElementById("simple-profile-list");
 
 const labels = {
   map: "Safety Map",
@@ -46,6 +50,7 @@ const state = {
   myReports: [],
   contacts: [],
   routes: [],
+  simpleProfiles: [],
 };
 
 const copy = {
@@ -536,6 +541,68 @@ function renderRouteHistory() {
     .join("");
 }
 
+function renderSimpleProfiles() {
+  if (!simpleProfilesList) return;
+  if (!state.simpleProfiles.length) {
+    simpleProfilesList.innerHTML = `<div class="empty-state">No profiles saved yet.</div>`;
+    return;
+  }
+
+  simpleProfilesList.innerHTML = state.simpleProfiles
+    .map(
+      (profile) => `
+      <article class="contact-row">
+        <div>
+          <strong>${escapeHtml(profile.name)}</strong>
+          <small>${escapeHtml(profile.email)} • ${escapeHtml(timeAgo(profile.created_at))}</small>
+        </div>
+      </article>`
+    )
+    .join("");
+}
+
+async function fetchSimpleProfiles() {
+  if (!supabase) return;
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("id, name, email, created_at")
+    .order("created_at", { ascending: false })
+    .limit(50);
+
+  if (error) {
+    console.error("[profiles] fetch error:", error);
+    showToast(error.message);
+    return;
+  }
+
+  state.simpleProfiles = data || [];
+  renderSimpleProfiles();
+  console.log("[profiles] fetch success:", state.simpleProfiles);
+}
+
+async function saveSimpleProfile(name, email) {
+  if (!supabase) return false;
+  const payload = {
+    name: (name || "").trim(),
+    email: (email || "").trim(),
+  };
+
+  const { data, error } = await supabase
+    .from("profiles")
+    .insert(payload)
+    .select("id, name, email, created_at")
+    .single();
+
+  if (error) {
+    console.error("[profiles] insert error:", error);
+    showToast(error.message);
+    return false;
+  }
+
+  console.log("[profiles] insert success:", data);
+  return true;
+}
+
 async function fetchIncidentFeed() {
   if (!supabase) return;
   const { data, error } = await supabase
@@ -876,6 +943,25 @@ document.getElementById("refresh-my-reports").addEventListener("click", fetchMyR
 document.getElementById("refresh-routes").addEventListener("click", fetchRouteHistory);
 document.getElementById("save-preferences-btn").addEventListener("click", savePreferences);
 
+if (simpleProfileForm) {
+  simpleProfileForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (!supabase) {
+      showToast(text("databaseDisabled"));
+      return;
+    }
+
+    const name = simpleProfileNameInput.value;
+    const email = simpleProfileEmailInput.value;
+    const saved = await saveSimpleProfile(name, email);
+    if (!saved) return;
+
+    simpleProfileForm.reset();
+    await fetchSimpleProfiles();
+    showToast("Profile saved.");
+  });
+}
+
 if (editProfileBtn) {
   editProfileBtn.addEventListener("click", () => {
     showProfileEditor();
@@ -1048,6 +1134,7 @@ languageSelect.addEventListener("change", () => {
 async function initApp() {
   applyLanguage("en");
   setProfileDisplayName(state.currentProfileName);
+  renderSimpleProfiles();
   if (!isSupabaseConfigured) {
     renderIncidentFeed();
     renderMyReports();
@@ -1073,6 +1160,7 @@ async function initApp() {
   await Promise.all([
     loadPreferences(),
     loadUserProfile(),
+    fetchSimpleProfiles(),
     fetchIncidentFeed(),
     fetchMyReports(),
     fetchTrustedContacts(),
