@@ -1033,6 +1033,35 @@ function buildRouteOption({ id, title, path, speedBiasMinutes = 0, safetyBias = 
   };
 }
 
+function rankGpsRoutes(routeChoices) {
+  if (!Array.isArray(routeChoices) || !routeChoices.length) return [];
+  const fastestEta = Math.min(...routeChoices.map((route) => route.etaMinutes));
+  const hasLowOrMedium = routeChoices.some((route) => route.riskLevel !== "high");
+  const riskRank = {
+    low: 0,
+    medium: 1,
+    high: hasLowOrMedium ? 2 : 1,
+  };
+
+  return routeChoices
+    .map((route) => {
+      const etaGapMinutes = Math.max(0, route.etaMinutes - fastestEta);
+      const speedScore = Math.max(0, 100 - etaGapMinutes * 8);
+      const priority = Math.round(route.score * 0.72 + speedScore * 0.28);
+      return {
+        ...route,
+        priorityScore: priority,
+      };
+    })
+    .sort((left, right) => {
+      const riskGap = (riskRank[left.riskLevel] ?? 1) - (riskRank[right.riskLevel] ?? 1);
+      if (riskGap !== 0) return riskGap;
+      if (right.priorityScore !== left.priorityScore) return right.priorityScore - left.priorityScore;
+      if (left.etaMinutes !== right.etaMinutes) return left.etaMinutes - right.etaMinutes;
+      return right.score - left.score;
+    });
+}
+
 function setGpsRouteSelection(routeId) {
   const selected =
     state.gps.routeChoices.find((route) => route.id === routeId) ||
@@ -1232,20 +1261,20 @@ function generateGpsRoutes(options = {}) {
     id: "B",
     title: "Route B",
     path: buildRoutePath(fromPoint, toPoint, -offset * 0.6),
-    speedBiasMinutes: 0,
-    safetyBias: 0,
+    speedBiasMinutes: -1,
+    safetyBias: 3,
     preferences,
   });
   const routeC = buildRouteOption({
     id: "C",
     title: "Route C",
     path: buildRoutePath(fromPoint, toPoint, 0),
-    speedBiasMinutes: -2,
-    safetyBias: -5,
+    speedBiasMinutes: -3,
+    safetyBias: -4,
     preferences,
   });
 
-  state.gps.routeChoices = [routeA, routeB, routeC].sort((left, right) => right.score - left.score);
+  state.gps.routeChoices = rankGpsRoutes([routeA, routeB, routeC]);
   setGpsRouteSelection(state.gps.routeChoices[0]?.id || "A");
   updateGpsHint();
   if (!options.silent) {
