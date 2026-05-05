@@ -722,6 +722,31 @@ async function saveSimpleProfile(name, email) {
   return true;
 }
 
+function hasMissingCoordinateColumnError(error) {
+  if (!error) return false;
+  return /(incident_lat|incident_lng|column)/i.test(`${error.message} ${error.details || ""}`);
+}
+
+async function insertIncidentReport(payload) {
+  if (!supabase) return { error: { message: "Database unavailable." } };
+  const basePayload = { ...payload };
+  const mapSource = state.map.selectedLatLng || state.map.userLatLng;
+  let withCoordinates = { ...basePayload };
+  if (state.map.schemaHasCoordinates && mapSource) {
+    withCoordinates = {
+      ...basePayload,
+      incident_lat: Number(mapSource.lat.toFixed(6)),
+      incident_lng: Number(mapSource.lng.toFixed(6)),
+    };
+  }
+  let result = await supabase.from("incident_reports").insert(withCoordinates);
+  if (result.error && state.map.schemaHasCoordinates && hasMissingCoordinateColumnError(result.error)) {
+    state.map.schemaHasCoordinates = false;
+    result = await supabase.from("incident_reports").insert(basePayload);
+  }
+  return result;
+}
+
 async function fetchIncidentFeed() {
   if (!supabase) return;
   const baseColumns = "id, incident_type, severity, location_text, details, created_at, status";
@@ -736,8 +761,7 @@ async function fetchIncidentFeed() {
     .limit(500);
   if (error) {
     const missingCoordinateColumn =
-      state.map.schemaHasCoordinates &&
-      /(incident_lat|incident_lng|column)/i.test(`${error.message} ${error.details || ""}`);
+      state.map.schemaHasCoordinates && hasMissingCoordinateColumnError(error);
     if (missingCoordinateColumn) {
       state.map.schemaHasCoordinates = false;
       await fetchIncidentFeed();
@@ -1339,7 +1363,7 @@ document.getElementById("report-form").addEventListener("submit", (event) => {
       reporter_device_id: deviceId,
       status: "active",
     };
-    const { error } = await supabase.from("incident_reports").insert(payload);
+    const { error } = await insertIncidentReport(payload);
     if (error) {
       showToast(error.message);
       return;
