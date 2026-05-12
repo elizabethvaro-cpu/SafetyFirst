@@ -755,6 +755,21 @@ fieldset {
   background: #dc2626;
 }
 
+.gps-navigation-pin-wrap {
+  background: transparent;
+  border: 0;
+}
+
+.gps-navigation-pin {
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  display: block;
+  border: 2px solid #fff;
+  background: #2563eb;
+  box-shadow: 0 6px 14px rgba(15, 23, 42, 0.35);
+}
+
 .route-option small.route-status-note {
   display: block;
   margin-top: 0.2rem;

@@ -101,6 +101,7 @@ const state = {
   routes: [],
   simpleProfiles: [],
   routeHistoryRatings: {},
+  routeHistoryLocationLabels: {},
   map: {
     instance: null,
     userMarker: null,
@@ -134,6 +135,9 @@ const state = {
     routeRatings: {},
     activeRouteId: null,
     currentRouteRiskLevel: null,
+    navigationMarker: null,
+    navigationAnimationTimer: null,
+    navigationPathIndex: 0,
     schemaHasCommunityTables: true,
     schemaHasRouteFeedbackTable: true,
     clickStage: "from",
@@ -745,10 +749,13 @@ function renderRouteHistory() {
     .map(
       (route) => {
         const selectedRating = Number(state.routeHistoryRatings[route.id] || 0);
+        const locationLabels = state.routeHistoryLocationLabels[route.id] || {};
+        const displayOrigin = locationLabels.origin || route.origin;
+        const displayDestination = locationLabels.destination || route.destination;
         return `
           <article class="contact-row">
             <div>
-              <strong>${escapeHtml(route.origin)} → ${escapeHtml(route.destination)}</strong>
+              <strong>${escapeHtml(displayOrigin)} → ${escapeHtml(displayDestination)}</strong>
               <small>${escapeHtml(route.route_key)} • ${escapeHtml(route.risk_level)} • ${escapeHtml(route.eta_minutes)} min • ${escapeHtml(timeAgo(route.created_at))}</small>
               <small class="route-feedback-note">Rate this suggested route:</small>
               <div class="gps-route-rate">
@@ -780,6 +787,38 @@ function renderRouteHistory() {
       }
     )
     .join("");
+}
+
+async function hydrateRouteHistoryLocationLabels() {
+  if (!state.routes.length) return;
+  const updates = {};
+  await Promise.all(
+    state.routes.map(async (route) => {
+      const nextLabels = {};
+      const originCoords = parseGpsCoordinates(route.origin);
+      const destinationCoords = parseGpsCoordinates(route.destination);
+      if (originCoords) {
+        const originStreet = await fetchStreetNameForLatLng(originCoords);
+        if (originStreet) nextLabels.origin = originStreet;
+      }
+      if (destinationCoords) {
+        const destinationStreet = await fetchStreetNameForLatLng(destinationCoords);
+        if (destinationStreet) nextLabels.destination = destinationStreet;
+      }
+      if (nextLabels.origin || nextLabels.destination) {
+        updates[route.id] = {
+          ...(state.routeHistoryLocationLabels[route.id] || {}),
+          ...nextLabels,
+        };
+      }
+    })
+  );
+  if (!Object.keys(updates).length) return;
+  state.routeHistoryLocationLabels = {
+    ...state.routeHistoryLocationLabels,
+    ...updates,
+  };
+  renderRouteHistory();
 }
 
 function renderCommunityRoutes() {
@@ -941,6 +980,17 @@ function setGpsInputStreetName(latlng, pointType, options = {}) {
     if (state.gps.reverseLookupTokens[tokenKey] !== requestToken) return;
     inputEl.value = streetName || fallbackLabel;
   })();
+}
+
+async function resolveLocationLabel(inputValue, fallbackLatLng, fallbackLabel) {
+  const normalizedInput = String(inputValue || "").trim();
+  const parsedCoordinates = parseGpsCoordinates(normalizedInput);
+  if (!parsedCoordinates && normalizedInput) {
+    return normalizedInput;
+  }
+  const lookupPoint = fallbackLatLng || parsedCoordinates;
+  const streetName = await fetchStreetNameForLatLng(lookupPoint);
+  return streetName || fallbackLabel;
 }
 
 function getGpsPreferenceWeights() {
@@ -1221,7 +1271,15 @@ function buildOsrmRouteOption({
   if (!path.length) return null;
   const metrics = computeRouteSafetyMetrics(path, preferences);
   const osrmMinutes = Math.max(1, Math.round((Number(routeData.duration) || 0) / 60));
-  const etaMinutes = Math.max(4, osrmMinutes + speedBiasMinutes);
+  const distanceKm = Math.max(0.05, (Number(routeData.distance) || 0) / 1000);
+  const speedKmh = profile === "walking" ? 4.8 : profile === "cycling" ? 14 : 28;
+  const profileEstimatedMinutes = Math.max(1, Math.round((distanceKm / speedKmh) * 60));
+  const etaMinutes = Math.max(
+    4,
+    (profile === "driving"
+      ? Math.max(osrmMinutes, profileEstimatedMinutes)
+      : Math.max(profileEstimatedMinutes, osrmMinutes)) + speedBiasMinutes
+  );
   const adjustedScore = Math.max(0, Math.min(100, metrics.score + scoreBias));
   const riskLevel = adjustedScore >= 72 ? "low" : adjustedScore >= 48 ? "medium" : "high";
   const directions =
@@ -1302,18 +1360,39 @@ async function tryBuildRealGpsRoutes(fromPoint, toPoint, preferences) {
   });
 
   const idOrder = ["A", "B", "C"];
-  return selectedEntries.slice(0, 3).map((item, index) => {
-    const routeId = idOrder[index] || `R${index + 1}`;
-    const profileTitle =
-      item.profile === "walking" ? "Walking" : item.profile === "cycling" ? "Cycling" : "Driving";
-    return buildOsrmRouteOption({
-      routeData: item.routeData,
-      profile: item.profile,
-      id: routeId,
-      title: `Route ${routeId} (${profileTitle})`,
-      preferences,
+  const builtRoutes = selectedEntries
+    .slice(0, 3)
+    .map((item, index) => {
+      const routeId = idOrder[index] || `R${index + 1}`;
+      const profileTitle =
+        item.profile === "walking" ? "Walking" : item.profile === "cycling" ? "Cycling" : "Driving";
+      const route = buildOsrmRouteOption({
+        routeData: item.routeData,
+        profile: item.profile,
+        id: routeId,
+        title: `Route ${routeId} (${profileTitle})`,
+        preferences,
+      });
+      if (!route) return null;
+      return {
+        ...route,
+        transportProfile: item.profile,
+      };
+    })
+    .filter(Boolean);
+
+  const drivingOption = builtRoutes.find((route) => route.transportProfile === "driving");
+  if (drivingOption) {
+    builtRoutes.forEach((route) => {
+      if (route.transportProfile === "walking") {
+        route.etaMinutes = Math.max(route.etaMinutes, drivingOption.etaMinutes + 4);
+      }
+      if (route.transportProfile === "cycling") {
+        route.etaMinutes = Math.max(route.etaMinutes, drivingOption.etaMinutes + 1);
+      }
     });
-  }).filter(Boolean);
+  }
+  return builtRoutes;
 }
 
 function computeRouteSafetyMetrics(path, preferences) {
@@ -1447,6 +1526,58 @@ function focusGpsRouteOnMap(route) {
   });
 }
 
+function stopGpsNavigationAnimation() {
+  if (state.gps.navigationAnimationTimer) {
+    window.clearInterval(state.gps.navigationAnimationTimer);
+    state.gps.navigationAnimationTimer = null;
+  }
+}
+
+function renderGpsNavigationGuide(route) {
+  if (!state.gps.map || !route?.path?.length) {
+    stopGpsNavigationAnimation();
+    if (state.gps.navigationMarker) {
+      state.gps.map?.removeLayer(state.gps.navigationMarker);
+      state.gps.navigationMarker = null;
+    }
+    return;
+  }
+
+  const startPoint = route.path[0];
+  if (!state.gps.navigationMarker) {
+    state.gps.navigationMarker = L.marker(startPoint, {
+      icon: L.divIcon({
+        className: "gps-navigation-pin-wrap",
+        html: '<span class="gps-navigation-pin"></span>',
+        iconSize: [16, 16],
+        iconAnchor: [8, 8],
+      }),
+      zIndexOffset: 700,
+    }).addTo(state.gps.map);
+  } else {
+    safeSetLatLng(state.gps.navigationMarker, startPoint);
+  }
+
+  const nextInstruction = route.directions?.[0]?.instruction || "Follow the highlighted route.";
+  state.gps.navigationMarker.bindTooltip(`GPS: ${nextInstruction}`, {
+    permanent: false,
+    direction: "top",
+    offset: [0, -10],
+  });
+
+  stopGpsNavigationAnimation();
+  state.gps.navigationPathIndex = 0;
+  state.gps.navigationAnimationTimer = window.setInterval(() => {
+    if (!state.gps.navigationMarker || !route.path.length) return;
+    const nextIndex = Math.min(route.path.length - 1, state.gps.navigationPathIndex + 2);
+    state.gps.navigationPathIndex = nextIndex;
+    safeSetLatLng(state.gps.navigationMarker, route.path[nextIndex]);
+    if (nextIndex >= route.path.length - 1) {
+      stopGpsNavigationAnimation();
+    }
+  }, 900);
+}
+
 function drawGpsRoutesOnMap() {
   if (!state.gps.map || !state.gps.routePolylinesLayer) return;
   state.gps.routePolylinesLayer.clearLayers();
@@ -1469,6 +1600,8 @@ function drawGpsRoutesOnMap() {
     }
     polyline.addTo(state.gps.routePolylinesLayer);
   });
+  const activeRoute = state.gps.routeChoices.find((route) => route.id === state.gps.activeRouteId);
+  renderGpsNavigationGuide(activeRoute);
 }
 
 function renderGpsRouteOptions() {
@@ -2561,6 +2694,7 @@ async function fetchRouteHistory() {
   }
   state.routes = data || [];
   renderRouteHistory();
+  void hydrateRouteHistoryLocationLabels();
 }
 
 async function fetchLastSosEvent() {
@@ -2819,11 +2953,20 @@ if (!routeFormAlreadyBound) {
     return;
   }
 
+  const originLabel = await resolveLocationLabel(originValue, state.gps.fromLatLng, "Current street");
+  const destinationLabel = await resolveLocationLabel(
+    destinationValue,
+    state.gps.toLatLng,
+    "Destination street"
+  );
+  routeOriginInput.value = originLabel;
+  routeDestinationInput.value = destinationLabel;
+
   const payload = {
     owner_user_id: state.currentUserId,
     owner_device_id: deviceId,
-    origin: originValue,
-    destination: destinationValue,
+    origin: originLabel,
+    destination: destinationLabel,
     route_key: selectedRoute.routeKey === "A" ? "A" : "B",
     risk_level: selectedRoute.riskLevel,
     eta_minutes: selectedRoute.etaMinutes,
