@@ -95,6 +95,7 @@ const state = {
   contacts: [],
   routes: [],
   simpleProfiles: [],
+  routeHistoryRatings: {},
   map: {
     instance: null,
     userMarker: null,
@@ -125,6 +126,7 @@ const state = {
     routePolylinesLayer: null,
     communityRoutes: [],
     routeChoices: [],
+    routeRatings: {},
     activeRouteId: null,
     currentRouteRiskLevel: null,
     schemaHasCommunityTables: true,
@@ -530,6 +532,17 @@ function severityClass(level) {
   return "medium";
 }
 
+function getRatingButtonState(score, selectedRating) {
+  const normalizedScore = Number(score);
+  const normalizedSelected = Number(selectedRating) || 0;
+  const isFilled = normalizedSelected > 0 && normalizedScore <= normalizedSelected;
+  const isSelected = normalizedSelected > 0 && normalizedScore === normalizedSelected;
+  return {
+    classes: [isFilled ? "is-filled" : "", isSelected ? "is-selected" : ""].filter(Boolean).join(" "),
+    ariaPressed: isSelected ? "true" : "false",
+  };
+}
+
 function hashString(value) {
   const textValue = String(value || "");
   let hash = 0;
@@ -717,32 +730,41 @@ function renderRouteHistory() {
 
   routeHistoryList.innerHTML = state.routes
     .map(
-      (route) => `
-      <article class="contact-row">
-        <div>
-          <strong>${escapeHtml(route.origin)} → ${escapeHtml(route.destination)}</strong>
-          <small>${escapeHtml(route.route_key)} • ${escapeHtml(route.risk_level)} • ${escapeHtml(route.eta_minutes)} min • ${escapeHtml(timeAgo(route.created_at))}</small>
-          <small class="route-feedback-note">Rate this suggested route:</small>
-          <div class="gps-route-rate">
-            ${[1, 2, 3, 4, 5]
-              .map(
-                (score) => `
-                  <button class="gps-rate-btn" data-action="rate-route" data-id="${route.id}" data-rating="${score}">
-                    ${score}
-                  </button>`
-              )
-              .join("")}
-          </div>
-        </div>
-        <div class="contact-actions">
-          <button class="tiny-btn" data-action="toggle-route-favorite" data-id="${route.id}" data-favorite="${route.is_favorite}">
-            ${route.is_favorite ? "Unfavorite" : "Favorite"}
-          </button>
-          <button class="tiny-btn" data-action="delete-route" data-id="${route.id}">
-            Delete
-          </button>
-        </div>
-      </article>`
+      (route) => {
+        const selectedRating = Number(state.routeHistoryRatings[route.id] || 0);
+        return `
+          <article class="contact-row">
+            <div>
+              <strong>${escapeHtml(route.origin)} → ${escapeHtml(route.destination)}</strong>
+              <small>${escapeHtml(route.route_key)} • ${escapeHtml(route.risk_level)} • ${escapeHtml(route.eta_minutes)} min • ${escapeHtml(timeAgo(route.created_at))}</small>
+              <small class="route-feedback-note">Rate this suggested route:</small>
+              <div class="gps-route-rate">
+                ${[1, 2, 3, 4, 5]
+                  .map((score) => {
+                    const ratingState = getRatingButtonState(score, selectedRating);
+                    return `
+                      <button
+                        class="gps-rate-btn ${ratingState.classes}"
+                        data-action="rate-route"
+                        data-id="${route.id}"
+                        data-rating="${score}"
+                        aria-pressed="${ratingState.ariaPressed}">
+                        ${score}
+                      </button>`;
+                  })
+                  .join("")}
+              </div>
+            </div>
+            <div class="contact-actions">
+              <button class="tiny-btn" data-action="toggle-route-favorite" data-id="${route.id}" data-favorite="${route.is_favorite}">
+                ${route.is_favorite ? "Unfavorite" : "Favorite"}
+              </button>
+              <button class="tiny-btn" data-action="delete-route" data-id="${route.id}">
+                Delete
+              </button>
+            </div>
+          </article>`;
+      }
     )
     .join("");
 }
@@ -1158,6 +1180,7 @@ function renderGpsRouteOptions() {
       const activeClass = route.id === state.gps.activeRouteId ? "active" : "";
       const riskClass = mapGpsRiskClass(route.riskLevel);
       const recommendedClass = route.id === state.gps.routeChoices[0]?.id ? "recommended" : "";
+      const selectedRating = Number(state.gps.routeRatings[route.id] || 0);
       return `
         <article class="route-option ${activeClass} ${riskClass} ${recommendedClass}">
           <button type="button" class="tiny-btn" data-action="select-gps-route" data-route-id="${route.id}" data-route-key="${route.routeKey}">
@@ -1179,9 +1202,20 @@ function renderGpsRouteOptions() {
               .join("")}
           </ol>
           <div class="gps-route-rate">
-            <button type="button" class="gps-rate-btn" data-action="rate-gps-route" data-route-id="${route.id}" data-rating="5">Rate 5</button>
-            <button type="button" class="gps-rate-btn" data-action="rate-gps-route" data-route-id="${route.id}" data-rating="4">Rate 4</button>
-            <button type="button" class="gps-rate-btn" data-action="rate-gps-route" data-route-id="${route.id}" data-rating="3">Rate 3</button>
+            ${[3, 4, 5]
+              .map((score) => {
+                const ratingState = getRatingButtonState(score, selectedRating);
+                return `<button
+                  type="button"
+                  class="gps-rate-btn ${ratingState.classes}"
+                  data-action="rate-gps-route"
+                  data-route-id="${route.id}"
+                  data-rating="${score}"
+                  aria-pressed="${ratingState.ariaPressed}">
+                  Rate ${score}
+                </button>`;
+              })
+              .join("")}
           </div>
         </article>`;
     })
@@ -1479,10 +1513,15 @@ function bindGpsUiEvents() {
 
       const rateButton = target.closest(".gps-rate-btn");
       if (rateButton instanceof HTMLElement && rateButton.dataset.action === "rate-gps-route") {
-        if (!hasDatabaseSession()) return;
         const routeId = rateButton.dataset.routeId;
         const rating = Number(rateButton.dataset.rating);
         if (!routeId || !Number.isFinite(rating)) return;
+        state.gps.routeRatings[routeId] = rating;
+        renderGpsRouteOptions();
+        if (!supabase || !state.currentUserId) {
+          showToast("Rating selected.");
+          return;
+        }
         const saved = await saveRouteFeedback(routeId, rating);
         if (saved) showToast("Thanks for rating this route.");
       }
@@ -2553,16 +2592,18 @@ trustedContactsList.addEventListener("click", async (event) => {
 routeHistoryList.addEventListener("click", async (event) => {
   const target = event.target;
   if (!(target instanceof HTMLElement)) return;
-  if (!supabase) return;
 
   const rateButton = target.closest("[data-action='rate-route']");
   if (rateButton instanceof HTMLElement) {
-    if (!hasDatabaseSession()) {
-      return;
-    }
     const routeId = rateButton.dataset.id;
     const rating = Number(rateButton.dataset.rating);
     if (!routeId || !Number.isFinite(rating)) return;
+    state.routeHistoryRatings[routeId] = rating;
+    renderRouteHistory();
+    if (!supabase || !state.currentUserId) {
+      showToast("Rating selected.");
+      return;
+    }
     const saved = await saveRouteFeedback(routeId, rating);
     if (saved) {
       showToast("Thanks for rating this route.");
@@ -2570,6 +2611,7 @@ routeHistoryList.addEventListener("click", async (event) => {
     return;
   }
 
+  if (!supabase) return;
   const actionTarget = target.closest("[data-action]");
   if (!(actionTarget instanceof HTMLElement)) return;
   const id = actionTarget.dataset.id;

@@ -815,6 +815,28 @@ fieldset {
   border-radius: 0.45rem;
   font-size: 0.72rem;
   padding: 0.25rem 0.45rem;
+  color: var(--text);
+  transition:
+    background-color 0.16s ease,
+    border-color 0.16s ease,
+    color 0.16s ease,
+    transform 0.12s ease;
+}
+
+.gps-rate-btn:hover {
+  transform: translateY(-1px);
+}
+
+.gps-rate-btn.is-filled {
+  background: #e0e7ff;
+  border-color: #9eb0ff;
+  color: #1d4ed8;
+}
+
+.gps-rate-btn.is-selected {
+  background: #2563eb;
+  border-color: #1d4ed8;
+  color: #fff;
 }
 
 .route-dot {
@@ -1037,6 +1059,18 @@ body.dark {
 
 body.dark .map-overlay.bottom {
   background: rgba(21, 31, 51, 0.94);
+}
+
+body.dark .gps-rate-btn.is-filled {
+  background: rgba(59, 130, 246, 0.2);
+  border-color: #3b82f6;
+  color: #bfdbfe;
+}
+
+body.dark .gps-rate-btn.is-selected {
+  background: #3b82f6;
+  border-color: #60a5fa;
+  color: #fff;
 }
 
 body.dark input,
