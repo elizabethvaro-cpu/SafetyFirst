@@ -783,6 +783,12 @@ fieldset {
   color: var(--muted);
 }
 
+.gps-turn-actions {
+  margin-top: 0.35rem;
+  display: flex;
+  gap: 0.35rem;
+}
+
 .gps-danger-pin-wrap {
   background: transparent;
   border: 0;

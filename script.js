@@ -86,6 +86,8 @@ const GPS_OSRM_BASE_URL = "https://router.project-osrm.org";
 const GPS_OSRM_TIMEOUT_MS = 4500;
 const GPS_REVERSE_GEOCODE_URL = "https://nominatim.openstreetmap.org/reverse";
 const GPS_REVERSE_GEOCODE_TIMEOUT_MS = 3500;
+const GPS_FORWARD_GEOCODE_URL = "https://nominatim.openstreetmap.org/search";
+const GPS_FORWARD_GEOCODE_TIMEOUT_MS = 4500;
 const ACCENT_COLOR_STORAGE_KEY = "safesteps_accent_color";
 const ACCENT_PALETTES = {
   blue: {
@@ -227,6 +229,7 @@ const state = {
     userPositionWatchId: null,
     routeRequestToken: 0,
     placeNameCache: {},
+    geocodeCache: {},
     reverseLookupTokens: {
       from: 0,
       to: 0,
@@ -1129,6 +1132,55 @@ async function fetchStreetNameForLatLng(latlng) {
   }
 }
 
+async function fetchLatLngForQuery(queryText) {
+  const normalizedQuery = String(queryText || "").trim();
+  if (!normalizedQuery) return null;
+  const cacheKey = normalizedQuery.toLowerCase();
+  if (state.gps.geocodeCache[cacheKey]) {
+    return state.gps.geocodeCache[cacheKey];
+  }
+  const query = new URLSearchParams({
+    format: "jsonv2",
+    q: normalizedQuery,
+    limit: "1",
+    addressdetails: "0",
+  });
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), GPS_FORWARD_GEOCODE_TIMEOUT_MS);
+  try {
+    const response = await fetch(`${GPS_FORWARD_GEOCODE_URL}?${query.toString()}`, {
+      signal: controller.signal,
+      headers: {
+        Accept: "application/json",
+      },
+    });
+    if (!response.ok) return null;
+    const payload = await response.json();
+    const match = Array.isArray(payload) ? payload[0] : null;
+    const lat = Number(match?.lat);
+    const lng = Number(match?.lon);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+    const resolved = { lat, lng };
+    state.gps.geocodeCache[cacheKey] = resolved;
+    return resolved;
+  } catch {
+    return null;
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
+}
+
+async function resolveGpsPointFromInput(inputValue, fallbackSeed, options = {}) {
+  const parsedCoordinates = parseGpsCoordinates(inputValue);
+  if (parsedCoordinates) return parsedCoordinates;
+  const textValue = String(inputValue || "").trim();
+  if (textValue) {
+    const geocoded = await fetchLatLngForQuery(textValue);
+    if (geocoded) return geocoded;
+  }
+  return resolveGpsPoint(textValue || inputValue, fallbackSeed, options);
+}
+
 function setGpsInputStreetName(latlng, pointType, options = {}) {
   const inputEl = pointType === "from" ? routeOriginInput : routeDestinationInput;
   if (!inputEl || !latlng) return;
@@ -1211,7 +1263,7 @@ function updateGpsHint(message) {
     return;
   }
   if (state.gps.navigationRouteId) {
-    gpsMapHint.textContent = "GPS active. Stay on the highlighted route.";
+    gpsMapHint.textContent = "GPS active. Pinch/scroll to zoom and follow the highlighted route.";
     return;
   }
   gpsMapHint.textContent = "Tap a route card or route line to start GPS navigation.";
@@ -1501,7 +1553,18 @@ function buildOsrmRouteOption({
       : profile === "cycling"
         ? Math.min(Math.max(profileEstimatedMinutes, osrmMinutes), profileEstimatedMinutes + 6)
         : Math.max(osrmMinutes, profileEstimatedMinutes);
-  const etaMinutes = Math.max(4, boundedModeMinutes + speedBiasMinutes);
+  const drivingCongestionFactor =
+    profile === "driving"
+      ? distanceKm >= 15
+        ? 1.42
+        : distanceKm >= 8
+          ? 1.34
+          : 1.2
+      : 1;
+  const preferenceTrafficBias =
+    profile === "driving" ? (preferences.avoidTraffic ? 0.96 : 1.07) : 1;
+  const calibratedModeMinutes = Math.round(boundedModeMinutes * drivingCongestionFactor * preferenceTrafficBias);
+  const etaMinutes = Math.max(4, calibratedModeMinutes + speedBiasMinutes);
   const adjustedScore = Math.max(0, Math.min(100, metrics.score + scoreBias));
   const riskLevel = adjustedScore >= 72 ? "low" : adjustedScore >= 48 ? "medium" : "high";
   const rawDirections = extractOsrmDirections(routeData, profile) || buildRouteDirections(id, etaMinutes, preferences);
@@ -1778,8 +1841,26 @@ function activateGpsNavigation(routeId) {
   state.gps.navigationStepIndex = 0;
   const activeRoute = getActiveGpsRoute();
   renderGpsTurnByTurn(activeRoute, 0);
+  if (state.gps.map && state.gps.userLatLng) {
+    state.gps.map.setZoom(Math.max(15, state.gps.map.getZoom()));
+    state.gps.map.panTo(state.gps.userLatLng, { animate: true, duration: 0.25 });
+  }
   drawGpsRoutesOnMap();
   updateGpsHint("GPS active. Follow the highlighted route and moving guide dot.");
+}
+
+function exitGpsNavigation(reason = "cancelled") {
+  if (!state.gps.navigationRouteId) return;
+  state.gps.navigationRouteId = null;
+  state.gps.navigationStepIndex = 0;
+  drawGpsRoutesOnMap();
+  renderGpsTurnByTurn(null);
+  updateGpsHint();
+  if (reason === "done") {
+    showToast("Navigation completed.");
+    return;
+  }
+  showToast("Navigation canceled.");
 }
 
 function focusGpsRouteOnMap(route) {
@@ -2335,8 +2416,12 @@ function bindGpsMapEvents() {
 function ensureGpsMap() {
   if (!gpsMapContainer || state.gps.map) return;
   const mapInstance = L.map(gpsMapContainer, {
-    zoomControl: false,
+    zoomControl: true,
     attributionControl: false,
+    scrollWheelZoom: true,
+    touchZoom: true,
+    doubleClickZoom: true,
+    boxZoom: true,
   }).setView([MAP_DEFAULT_CENTER.lat, MAP_DEFAULT_CENTER.lng], 12);
   state.gps.map = mapInstance;
   state.gps.dangerMarkersLayer = L.layerGroup().addTo(mapInstance);
@@ -2411,6 +2496,7 @@ function bindGpsUiEvents() {
   const gpsRouteOptionsBound = routeOptionsContainer?.dataset.gpsBound === "true";
   const gpsCommunitySubmitBound = communityRouteForm?.dataset.gpsBound === "true";
   const gpsCommunityListBound = communityRouteList?.dataset.gpsBound === "true";
+  const gpsTurnPanelBound = gpsTurnPanel?.dataset.gpsBound === "true";
 
   if (!gpsRouteOptionsBound) {
     if (routeOptionsContainer) routeOptionsContainer.dataset.gpsBound = "true";
@@ -2521,6 +2607,22 @@ function bindGpsUiEvents() {
       }
       generateGpsRoutes({ silent: true });
       showToast("Community route applied.");
+    });
+  }
+
+  if (!gpsTurnPanelBound) {
+    if (gpsTurnPanel) gpsTurnPanel.dataset.gpsBound = "true";
+    gpsTurnPanel?.addEventListener("click", (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) return;
+      const actionTarget = target.closest("[data-action]");
+      if (!(actionTarget instanceof HTMLElement)) return;
+      if (actionTarget.dataset.action === "cancel-gps-nav") {
+        exitGpsNavigation("cancelled");
+      }
+      if (actionTarget.dataset.action === "finish-gps-nav") {
+        exitGpsNavigation("done");
+      }
     });
   }
 }
@@ -3326,10 +3428,10 @@ if (!routeFormAlreadyBound) {
 
   const originParsed = parseGpsCoordinates(originValue);
   const destinationParsed = parseGpsCoordinates(destinationValue);
-  state.gps.fromLatLng = resolveGpsPoint(originValue, "route-origin", {
+  state.gps.fromLatLng = await resolveGpsPointFromInput(originValue, "route-origin", {
     preferNearby: !originParsed,
   });
-  state.gps.toLatLng = resolveGpsPoint(destinationValue, "route-destination", {
+  state.gps.toLatLng = await resolveGpsPointFromInput(destinationValue, "route-destination", {
     anchorPoint: state.gps.fromLatLng,
     preferNearby: !destinationParsed,
   });
