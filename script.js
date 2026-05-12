@@ -12,6 +12,7 @@ const pages = [...document.querySelectorAll(".page")];
 const navItems = [...document.querySelectorAll(".nav-item")];
 const toast = document.getElementById("toast");
 const themeSelect = document.getElementById("theme-select");
+const accentColorSelect = document.getElementById("accent-color-select");
 const languageSelect = document.getElementById("language-select");
 const incidentFeed = document.getElementById("incident-feed");
 const myReportsList = document.getElementById("my-reports-list");
@@ -81,6 +82,16 @@ const GPS_OSRM_BASE_URL = "https://router.project-osrm.org";
 const GPS_OSRM_TIMEOUT_MS = 4500;
 const GPS_REVERSE_GEOCODE_URL = "https://nominatim.openstreetmap.org/reverse";
 const GPS_REVERSE_GEOCODE_TIMEOUT_MS = 3500;
+const ACCENT_COLOR_STORAGE_KEY = "safesteps_accent_color";
+const ACCENT_PALETTES = {
+  blue: "#2b59ff",
+  red: "#dc2626",
+  orange: "#f97316",
+  yellow: "#ca8a04",
+  green: "#16a34a",
+  purple: "#7c3aed",
+  pink: "#db2777",
+};
 
 const labels = {
   map: "Safety Map",
@@ -461,6 +472,41 @@ function showToast(message) {
   toast.textContent = message;
   toast.classList.add("show");
   setTimeout(() => toast.classList.remove("show"), 2200);
+}
+
+function getAccentColorKey(value) {
+  return ACCENT_PALETTES[value] ? value : "blue";
+}
+
+function readStoredAccentColor() {
+  try {
+    return getAccentColorKey(window.localStorage.getItem(ACCENT_COLOR_STORAGE_KEY) || "blue");
+  } catch {
+    return "blue";
+  }
+}
+
+function applyAccentColor(colorKey, options = {}) {
+  const normalized = getAccentColorKey(colorKey);
+  const colorValue = ACCENT_PALETTES[normalized];
+  document.documentElement.style.setProperty("--primary", colorValue);
+  if (accentColorSelect) {
+    accentColorSelect.value = normalized;
+  }
+  if (options.persist === false) return;
+  try {
+    window.localStorage.setItem(ACCENT_COLOR_STORAGE_KEY, normalized);
+  } catch {
+    // Ignore storage restrictions and keep runtime selection.
+  }
+}
+
+function applyThemeMode(modeValue) {
+  const normalized = modeValue === "dark" ? "dark" : "light";
+  if (themeSelect) {
+    themeSelect.value = normalized;
+  }
+  document.body.classList.toggle("dark", normalized === "dark");
 }
 
 function invalidateMapLayout(mapInstance) {
@@ -2762,6 +2808,7 @@ async function fetchLastSosEvent() {
 }
 
 async function savePreferences() {
+  applyAccentColor(accentColorSelect?.value || "blue");
   if (!supabase || !state.currentUserId) return;
   const payload = {
     owner_user_id: state.currentUserId,
@@ -2781,10 +2828,12 @@ async function savePreferences() {
     showToast(error.message);
     return;
   }
+  applyThemeMode(themeSelect.value);
   showToast(text("savedPreferences"));
 }
 
 async function loadPreferences() {
+  applyAccentColor(readStoredAccentColor(), { persist: false });
   if (!supabase || !state.currentUserId) return;
   const { data, error } = await supabase
     .from("user_preferences")
@@ -2797,14 +2846,16 @@ async function loadPreferences() {
     showToast(error.message);
     return;
   }
-  if (!data) return;
+  if (!data) {
+    applyThemeMode(themeSelect.value || "light");
+    return;
+  }
   languageSelect.value = data.language || "en";
-  themeSelect.value = data.theme || "light";
+  applyThemeMode(data.theme || "light");
   document.getElementById("push-alerts").checked = Boolean(data.push_alerts);
   document.getElementById("location-sharing").checked = Boolean(data.location_sharing);
   document.getElementById("auto-siren").checked = Boolean(data.auto_siren);
   document.getElementById("share-route").checked = Boolean(data.share_route);
-  document.body.classList.toggle("dark", themeSelect.value === "dark");
   applyLanguage(languageSelect.value);
 }
 
@@ -3273,12 +3324,19 @@ trustedContactForm.addEventListener("submit", async (event) => {
 bindGpsUiEvents();
 
 themeSelect.addEventListener("change", () => {
-  document.body.classList.toggle("dark", themeSelect.value === "dark");
+  applyThemeMode(themeSelect.value);
+});
+
+accentColorSelect?.addEventListener("change", () => {
+  applyAccentColor(accentColorSelect.value);
 });
 
 languageSelect.addEventListener("change", () => {
   applyLanguage(languageSelect.value);
 });
+
+applyAccentColor(readStoredAccentColor(), { persist: false });
+applyThemeMode(themeSelect.value || "light");
 
 async function initApp() {
   applyLanguage("en");
