@@ -74,6 +74,8 @@ const MAP_TIME_RANGE_TO_HOURS = {
 const GPS_ROUTE_SAMPLE_POINTS = 24;
 const GPS_INCIDENT_PROXIMITY_METERS = 260;
 const GPS_DANGER_MARKER_LIMIT = 150;
+const GPS_NEARBY_FALLBACK_MIN_METERS = 320;
+const GPS_NEARBY_FALLBACK_MAX_METERS = 2300;
 
 const labels = {
   map: "Safety Map",
@@ -549,6 +551,25 @@ function deriveCoordinatesFromSeed(seed) {
   };
 }
 
+function deriveNearbyCoordinatesFromSeed(seed, anchorPoint) {
+  if (!anchorPoint || !Number.isFinite(anchorPoint.lat) || !Number.isFinite(anchorPoint.lng)) {
+    return deriveCoordinatesFromSeed(seed);
+  }
+  const hash = hashString(seed || "nearby-point");
+  const radiusMeters =
+    GPS_NEARBY_FALLBACK_MIN_METERS +
+    (hash % (GPS_NEARBY_FALLBACK_MAX_METERS - GPS_NEARBY_FALLBACK_MIN_METERS + 1));
+  const bearingRadians = (((Math.floor(hash / 700) % 360) * Math.PI) / 180);
+  const latOffset = (radiusMeters * Math.cos(bearingRadians)) / 111111;
+  const lngDivisor = Math.max(0.2, Math.cos(toRadians(anchorPoint.lat)));
+  const lngOffset = (radiusMeters * Math.sin(bearingRadians)) / (111111 * lngDivisor);
+  return {
+    lat: anchorPoint.lat + latOffset,
+    lng: anchorPoint.lng + lngOffset,
+    inferred: true,
+  };
+}
+
 function normalizeIncident(record) {
   const normalized = { ...(record || {}) };
   const lat = Number(normalized.incident_lat);
@@ -817,7 +838,7 @@ function getGpsPreferenceWeights() {
   };
 }
 
-function resolveGpsPoint(inputValue, fallbackSeed) {
+function parseGpsCoordinates(inputValue) {
   const textValue = (inputValue || "").trim();
   const coordsMatch = textValue.match(
     /^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/
@@ -827,6 +848,18 @@ function resolveGpsPoint(inputValue, fallbackSeed) {
       lat: Number(coordsMatch[1]),
       lng: Number(coordsMatch[2]),
     };
+  }
+  return null;
+}
+
+function resolveGpsPoint(inputValue, fallbackSeed, options = {}) {
+  const parsedCoordinates = parseGpsCoordinates(inputValue);
+  if (parsedCoordinates) {
+    return parsedCoordinates;
+  }
+  const textValue = (inputValue || "").trim();
+  if (options.anchorPoint && options.preferNearby !== false) {
+    return deriveNearbyCoordinatesFromSeed(textValue || fallbackSeed || "gps-point", options.anchorPoint);
   }
   return deriveCoordinatesFromSeed(textValue || fallbackSeed || "gps-point");
 }
@@ -892,6 +925,20 @@ function computeRouteDistanceMeters(path) {
     total += distanceMeters(path[index - 1].lat, path[index - 1].lng, path[index].lat, path[index].lng);
   }
   return total;
+}
+
+function estimateRouteBaseMinutes(distanceKm) {
+  if (!Number.isFinite(distanceKm) || distanceKm <= 0) return 6;
+  if (distanceKm <= 1.2) {
+    return Math.max(6, Math.round(distanceKm * 10 + 2));
+  }
+  if (distanceKm <= 3) {
+    return Math.max(8, Math.round(distanceKm * 8.5 + 2));
+  }
+  if (distanceKm <= 7) {
+    return Math.max(14, Math.round(distanceKm * 7 + 4));
+  }
+  return Math.max(24, Math.round(distanceKm * 6.2 + 6));
 }
 
 function formatDurationMinutes(totalMinutes) {
@@ -1014,7 +1061,7 @@ function computeRouteSafetyMetrics(path, preferences) {
 function buildRouteOption({ id, title, path, speedBiasMinutes = 0, safetyBias = 0, preferences }) {
   const metrics = computeRouteSafetyMetrics(path, preferences);
   const distanceKm = computeRouteDistanceMeters(path) / 1000;
-  const baseMinutes = Math.max(7, Math.round(distanceKm * 12));
+  const baseMinutes = estimateRouteBaseMinutes(distanceKm);
   const etaMinutes = Math.max(5, baseMinutes + speedBiasMinutes);
   const adjustedScore = Math.max(0, Math.min(100, metrics.score + safetyBias));
   const riskLevel = adjustedScore >= 72 ? "low" : adjustedScore >= 48 ? "medium" : "high";
@@ -1239,16 +1286,27 @@ function refreshGpsWithIncidents() {
 }
 
 function generateGpsRoutes(options = {}) {
-  const fromPoint = state.gps.fromLatLng || resolveGpsPoint(routeOriginInput.value, "route-origin");
-  const toPoint = state.gps.toLatLng || resolveGpsPoint(routeDestinationInput.value, "route-destination");
+  const originInputValue = routeOriginInput.value;
+  const destinationInputValue = routeDestinationInput.value;
+  const originHasCoordinates = Boolean(parseGpsCoordinates(originInputValue));
+  const destinationHasCoordinates = Boolean(parseGpsCoordinates(destinationInputValue));
+  const fromPoint =
+    state.gps.fromLatLng ||
+    resolveGpsPoint(originInputValue, "route-origin", { preferNearby: !originHasCoordinates });
+  const toPoint =
+    state.gps.toLatLng ||
+    resolveGpsPoint(destinationInputValue, "route-destination", {
+      anchorPoint: fromPoint,
+      preferNearby: !destinationHasCoordinates,
+    });
   state.gps.fromLatLng = fromPoint;
   state.gps.toLatLng = toPoint;
   setGpsWaypoint(fromPoint, "from");
   setGpsWaypoint(toPoint, "to");
 
   const preferences = getGpsPreferenceWeights();
-  const baseDistance = distanceMeters(fromPoint.lat, fromPoint.lng, toPoint.lat, toPoint.lng);
-  const offset = Math.max(0.01, (baseDistance / 1000) * 0.018);
+  const directSpanDegrees = Math.hypot(fromPoint.lat - toPoint.lat, fromPoint.lng - toPoint.lng);
+  const offset = Math.min(0.01, Math.max(0.0012, directSpanDegrees * 0.32));
   const routeA = buildRouteOption({
     id: "A",
     title: "Route A",
@@ -2285,8 +2343,15 @@ if (!routeFormAlreadyBound) {
     return;
   }
 
-  state.gps.fromLatLng = resolveGpsPoint(originValue, "route-origin");
-  state.gps.toLatLng = resolveGpsPoint(destinationValue, "route-destination");
+  const originParsed = parseGpsCoordinates(originValue);
+  const destinationParsed = parseGpsCoordinates(destinationValue);
+  state.gps.fromLatLng = resolveGpsPoint(originValue, "route-origin", {
+    preferNearby: !originParsed,
+  });
+  state.gps.toLatLng = resolveGpsPoint(destinationValue, "route-destination", {
+    anchorPoint: state.gps.fromLatLng,
+    preferNearby: !destinationParsed,
+  });
   if (state.gps.map) {
     setGpsWaypoint(state.gps.fromLatLng, "from");
     setGpsWaypoint(state.gps.toLatLng, "to");
