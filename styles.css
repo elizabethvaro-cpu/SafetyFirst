@@ -730,10 +730,7 @@ fieldset {
   min-height: 160px;
   position: relative;
   overflow: hidden;
-  background:
-    radial-gradient(circle at 15% 20%, rgba(24, 169, 87, 0.23), transparent 33%),
-    radial-gradient(circle at 82% 74%, rgba(43, 89, 255, 0.18), transparent 38%),
-    var(--route-bg);
+  background: var(--surface);
   border: 1px solid var(--line);
   transition:
     height 0.2s ease,
@@ -967,58 +964,6 @@ fieldset {
   color: #fff;
 }
 
-.route-dot {
-  position: absolute;
-  width: 15px;
-  height: 15px;
-  border-radius: 999px;
-  z-index: 1;
-}
-
-.route-dot.start {
-  background: var(--safe);
-  left: 15%;
-  top: 65%;
-  z-index: 410;
-}
-
-.route-dot.end {
-  background: var(--danger);
-  left: 78%;
-  top: 26%;
-  z-index: 410;
-}
-
-.route-line {
-  position: absolute;
-  left: 18%;
-  top: 64%;
-  width: 62%;
-  border-top: 4px dashed var(--route-accent-line);
-  transform: rotate(-27deg);
-}
-
-.route-badge {
-  position: absolute;
-  padding: 0.32rem 0.58rem;
-  background: #fff;
-  border-radius: 999px;
-  border: 1px solid var(--line);
-  font-size: 0.74rem;
-}
-
-.route-badge.start {
-  left: 10%;
-  top: 73%;
-  z-index: 420;
-}
-
-.route-badge.end {
-  right: 8%;
-  top: 16%;
-  z-index: 420;
-}
-
 .route-options {
   display: grid;
   gap: 0.5rem;
@@ -1212,8 +1157,7 @@ body.dark select,
 body.dark textarea,
 body.dark .chip,
 body.dark .route-option,
-body.dark .contact-row,
-body.dark .route-badge {
+body.dark .contact-row {
   background: #0f1829;
   color: #f8fafc;
 }
