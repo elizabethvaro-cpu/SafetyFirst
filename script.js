@@ -49,6 +49,7 @@ const mapFilterType = document.getElementById("map-filter-type");
 const mapFilterSeverity = document.getElementById("map-filter-severity");
 const mapFilterBtn = document.getElementById("map-filter-btn");
 const mapAlertsBtn = document.getElementById("map-alerts-btn");
+const gpsRouteMapCard = document.getElementById("gps-route-map-card");
 const gpsMapContainer = document.getElementById("gps-live-map");
 const gpsMapHint = document.getElementById("gps-map-hint");
 const gpsTurnPanel = document.getElementById("gps-turn-panel");
@@ -216,6 +217,7 @@ const state = {
     activeRouteId: null,
     navigationRouteId: null,
     navigationStepIndex: 0,
+    mapViewMode: "embedded",
     currentRouteRiskLevel: null,
     navigationMarker: null,
     lastNavigationLatLng: null,
@@ -644,6 +646,24 @@ function invalidateMapLayout(mapInstance) {
   });
 }
 
+function setGpsMapViewMode(mode) {
+  if (!gpsRouteMapCard) return;
+  const normalized = mode === "full" || mode === "half" ? mode : "embedded";
+  state.gps.mapViewMode = normalized;
+  gpsRouteMapCard.classList.toggle("is-half", normalized === "half");
+  gpsRouteMapCard.classList.toggle("is-full", normalized === "full");
+  gpsRouteMapCard.querySelectorAll("[data-action^='gps-map-']").forEach((button) => {
+    if (!(button instanceof HTMLElement)) return;
+    const action = button.dataset.action;
+    const isActive =
+      (action === "gps-map-half" && normalized === "half") ||
+      (action === "gps-map-full" && normalized === "full") ||
+      (action === "gps-map-embed" && normalized === "embedded");
+    button.classList.toggle("is-active", isActive);
+  });
+  invalidateMapLayout(state.gps.map);
+}
+
 function refreshActivePageMap(targetPage) {
   if (targetPage === "map") {
     invalidateMapLayout(state.map.instance);
@@ -654,6 +674,9 @@ function refreshActivePageMap(targetPage) {
 }
 
 function switchPage(target) {
+  if (target !== "gps" && state.gps.mapViewMode !== "embedded") {
+    setGpsMapViewMode("embedded");
+  }
   pages.forEach((page) => page.classList.toggle("active", page.dataset.page === target));
   navItems.forEach((item) => item.classList.toggle("active", item.dataset.target === target));
   pageTitle.textContent = (copy[languageSelect.value] || copy.en)[`${target}Title`] || labels[target];
@@ -1393,6 +1416,121 @@ function buildRouteDirections(routeId, etaMinutes, preferences) {
   ];
 }
 
+function buildDirectionsForTransportMode(mode, etaMinutes, preferences) {
+  const safeMinutes = Math.max(4, Math.round(etaMinutes || 0));
+  if (mode === "bus") {
+    const walkToStop = Math.max(4, Math.round(safeMinutes * 0.2));
+    const transferWait = Math.max(3, Math.round(safeMinutes * 0.12));
+    const busRide = Math.max(6, safeMinutes - walkToStop - transferWait);
+    return [
+      {
+        mode: "walk",
+        label: "Walk",
+        durationMinutes: walkToStop,
+        instruction: "Walk to the nearest bus stop.",
+      },
+      {
+        mode: "bus",
+        label: "Bus",
+        durationMinutes: transferWait,
+        instruction: `Wait for ${
+          preferences.avoidTraffic ? "Bus Rapid Transit" : "local bus"
+        } service.`,
+      },
+      {
+        mode: "bus",
+        label: "Bus",
+        durationMinutes: busRide,
+        instruction: "Ride the bus toward your destination and exit near the final stop.",
+      },
+    ];
+  }
+  if (mode === "train") {
+    const stationWalk = Math.max(5, Math.round(safeMinutes * 0.17));
+    const platformWait = Math.max(4, Math.round(safeMinutes * 0.1));
+    const trainRide = Math.max(8, safeMinutes - stationWalk - platformWait);
+    return [
+      {
+        mode: "walk",
+        label: "Walk",
+        durationMinutes: stationWalk,
+        instruction: "Walk to the nearest train/metro station.",
+      },
+      {
+        mode: "train",
+        label: "Train",
+        durationMinutes: platformWait,
+        instruction: "Board the next train headed toward your destination corridor.",
+      },
+      {
+        mode: "train",
+        label: "Train",
+        durationMinutes: trainRide,
+        instruction: "Stay on the train until the destination-area station.",
+      },
+    ];
+  }
+  if (mode === "flight") {
+    const airportTransfer = Math.max(25, Math.round(safeMinutes * 0.32));
+    const flightTime = Math.max(45, Math.round(safeMinutes * 0.48));
+    const arrivalTransfer = Math.max(15, safeMinutes - airportTransfer - flightTime);
+    return [
+      {
+        mode: "drive",
+        label: "Transfer",
+        durationMinutes: airportTransfer,
+        instruction: "Travel to the departure airport and complete check-in/security.",
+      },
+      {
+        mode: "flight",
+        label: "Flight",
+        durationMinutes: flightTime,
+        instruction: "Take the scheduled flight to the destination airport.",
+      },
+      {
+        mode: "drive",
+        label: "Transfer",
+        durationMinutes: arrivalTransfer,
+        instruction: "Travel from the airport to your destination.",
+      },
+    ];
+  }
+  return buildRouteDirections("A", safeMinutes, preferences);
+}
+
+function buildDerivedTransportRoute({
+  id,
+  title,
+  mode,
+  path,
+  etaMinutes,
+  preferences,
+  scoreBias = 0,
+  riskBias = 0,
+}) {
+  if (!Array.isArray(path) || !path.length) return null;
+  const metrics = computeRouteSafetyMetrics(path, preferences);
+  const adjustedScore = Math.max(0, Math.min(100, metrics.score + scoreBias));
+  const adjustedRiskScore = Math.max(0, Math.min(100, adjustedScore + riskBias));
+  const riskLevel = adjustedRiskScore >= 72 ? "low" : adjustedRiskScore >= 48 ? "medium" : "high";
+  const directions = normalizeRouteDirectionsToEta(
+    buildDirectionsForTransportMode(mode, etaMinutes, preferences),
+    etaMinutes
+  );
+  return {
+    id,
+    routeKey: id,
+    title,
+    path,
+    score: adjustedScore,
+    riskLevel,
+    etaMinutes: Math.max(4, Math.round(etaMinutes)),
+    directions,
+    nearbyIncidents: metrics.nearbyIncidents,
+    transportProfile: mode,
+  };
+}
+
 function getDirectionsDurationMinutes(directions) {
   if (!Array.isArray(directions) || !directions.length) return 0;
   return directions.reduce((sum, step) => sum + Math.max(1, Number(step.durationMinutes) || 0), 0);
@@ -1588,8 +1726,8 @@ function buildOsrmRouteOption({
 async function tryBuildRealGpsRoutes(fromPoint, toPoint, preferences) {
   const straightDistance = distanceMeters(fromPoint.lat, fromPoint.lng, toPoint.lat, toPoint.lng);
   const profiles = new Set(["driving"]);
-  if (straightDistance <= 6000) profiles.add("walking");
-  if (preferences.avoidTraffic) profiles.add("cycling");
+  if (straightDistance <= 15000) profiles.add("walking");
+  if (straightDistance <= 18000 || preferences.avoidTraffic) profiles.add("cycling");
 
   const routeBatches = await Promise.all(
     [...profiles].map(async (profile) => {
@@ -1611,63 +1749,89 @@ async function tryBuildRealGpsRoutes(fromPoint, toPoint, preferences) {
     routeMap[entry.profile].push(entry);
   });
 
-  const selectedEntries = [];
-  const usedEntries = new Set();
-  const trySelect = (profile, preferredIndex = 0) => {
+  const idOrder = ["A", "B", "C", "D", "E", "F"];
+  let idIndex = 0;
+  const nextRouteId = () => idOrder[idIndex++] || `R${idIndex}`;
+  const builtRoutes = [];
+
+  const addProfileRoute = (profile, optionIndex = 0, titleSuffix = "") => {
     const options = routeMap[profile] || [];
-    const candidate = options[preferredIndex];
-    if (!candidate) return;
-    const key = `${profile}:${candidate.index}`;
-    if (usedEntries.has(key)) return;
-    usedEntries.add(key);
-    selectedEntries.push(candidate);
+    const candidate = options[optionIndex];
+    if (!candidate) return null;
+    const routeId = nextRouteId();
+    const profileTitle =
+      profile === "walking" ? "Walking" : profile === "cycling" ? "Cycling" : "Driving";
+    const route = buildOsrmRouteOption({
+      routeData: candidate.routeData,
+      profile,
+      id: routeId,
+      title: `Route ${routeId} (${profileTitle}${titleSuffix})`,
+      preferences,
+    });
+    if (!route) return null;
+    const decorated = {
+      ...route,
+      transportProfile: profile,
+    };
+    builtRoutes.push(decorated);
+    return decorated;
   };
 
-  // Always include a driving option.
-  trySelect("driving", 0);
-  // Include walking for realistic short-distance comparison.
-  if (straightDistance <= 6000) {
-    trySelect("walking", 0);
+  const drivingPrimary = addProfileRoute("driving", 0);
+  addProfileRoute("walking", 0);
+  addProfileRoute("cycling", 0);
+  if ((routeMap.driving || []).length > 1 && straightDistance >= 5000 && straightDistance < 220000) {
+    addProfileRoute("driving", 1, " Alt");
   }
-  // Include cycling alternative when traffic avoidance is requested.
-  if (preferences.avoidTraffic) {
-    trySelect("cycling", 0);
-  }
-  // Fill remaining slots with next-fastest unique options.
-  const allCandidatesBySpeed = routeBatches
-    .flat()
-    .sort(
-      (left, right) => (Number(left.routeData.duration) || Infinity) - (Number(right.routeData.duration) || Infinity)
-    );
-  allCandidatesBySpeed.forEach((candidate) => {
-    if (selectedEntries.length >= 3) return;
-    const key = `${candidate.profile}:${candidate.index}`;
-    if (usedEntries.has(key)) return;
-    usedEntries.add(key);
-    selectedEntries.push(candidate);
-  });
 
-  const idOrder = ["A", "B", "C"];
-  const builtRoutes = selectedEntries
-    .slice(0, 3)
-    .map((item, index) => {
-      const routeId = idOrder[index] || `R${index + 1}`;
-      const profileTitle =
-        item.profile === "walking" ? "Walking" : item.profile === "cycling" ? "Cycling" : "Driving";
-      const route = buildOsrmRouteOption({
-        routeData: item.routeData,
-        profile: item.profile,
-        id: routeId,
-        title: `Route ${routeId} (${profileTitle})`,
+  const transportBase = drivingPrimary || builtRoutes[0] || null;
+  if (transportBase?.path?.length) {
+    const busEtaMinutes = Math.max(8, Math.round(transportBase.etaMinutes * 1.22 + 6));
+    const busRouteId = nextRouteId();
+    const busRoute = buildDerivedTransportRoute({
+      id: busRouteId,
+      title: `Route ${busRouteId} (Bus)`,
+      mode: "bus",
+      path: transportBase.path,
+      etaMinutes: busEtaMinutes,
+      preferences,
+      scoreBias: -2,
+    });
+    if (busRoute) builtRoutes.push(busRoute);
+
+    if (straightDistance >= 2500) {
+      const trainFactor = preferences.avoidTraffic ? 0.9 : 0.98;
+      const trainEtaMinutes = Math.max(7, Math.round(transportBase.etaMinutes * trainFactor + 7));
+      const trainRouteId = nextRouteId();
+      const trainRoute = buildDerivedTransportRoute({
+        id: trainRouteId,
+        title: `Route ${trainRouteId} (Train)`,
+        mode: "train",
+        path: transportBase.path,
+        etaMinutes: trainEtaMinutes,
         preferences,
+        scoreBias: 2,
       });
-      if (!route) return null;
-      return {
-        ...route,
-        transportProfile: item.profile,
-      };
-    })
-    .filter(Boolean);
+      if (trainRoute) builtRoutes.push(trainRoute);
+    }
+  }
+
+  if (straightDistance >= 220000) {
+    const flightPath = buildRoutePath(fromPoint, toPoint, 0);
+    const flightEtaMinutes = Math.max(90, Math.round(straightDistance / 1000 / 700 * 60 + 70));
+    const flightRouteId = nextRouteId();
+    const flightRoute = buildDerivedTransportRoute({
+      id: flightRouteId,
+      title: `Route ${flightRouteId} (Flight)`,
+      mode: "flight",
+      path: flightPath,
+      etaMinutes: flightEtaMinutes,
+      preferences,
+      scoreBias: -4,
+      riskBias: -2,
+    });
+    if (flightRoute) builtRoutes.push(flightRoute);
+  }
 
   const drivingOption = builtRoutes.find((route) => route.transportProfile === "driving");
   const directWalkMinutes = Math.max(4, Math.round((straightDistance / 1000 / 4.9) * 60));
@@ -1691,7 +1855,7 @@ async function tryBuildRealGpsRoutes(fromPoint, toPoint, preferences) {
       );
     }
   }
-  const routePair = builtRoutes.slice(0, 3);
+  const routePair = builtRoutes.slice(0, 6);
   for (let i = 0; i < routePair.length; i += 1) {
     for (let j = i + 1; j < routePair.length; j += 1) {
       if (routePair[i].transportProfile === routePair[j].transportProfile) continue;
@@ -1704,7 +1868,7 @@ async function tryBuildRealGpsRoutes(fromPoint, toPoint, preferences) {
       }
     }
   }
-  return builtRoutes;
+  return builtRoutes.slice(0, 6);
 }
 
 function computeRouteSafetyMetrics(path, preferences) {
@@ -1839,6 +2003,7 @@ function activateGpsNavigation(routeId) {
   setGpsRouteSelection(routeId);
   state.gps.navigationRouteId = routeId;
   state.gps.navigationStepIndex = 0;
+  setGpsMapViewMode("half");
   const activeRoute = getActiveGpsRoute();
   renderGpsTurnByTurn(activeRoute, 0);
   if (state.gps.map && state.gps.userLatLng) {
@@ -1853,6 +2018,7 @@ function exitGpsNavigation(reason = "cancelled") {
   if (!state.gps.navigationRouteId) return;
   state.gps.navigationRouteId = null;
   state.gps.navigationStepIndex = 0;
+  setGpsMapViewMode("embedded");
   drawGpsRoutesOnMap();
   renderGpsTurnByTurn(null);
   updateGpsHint();
@@ -2241,7 +2407,7 @@ function generateGpsRoutes(options = {}) {
   const offset = Math.min(0.01, Math.max(0.0012, directSpanDegrees * 0.32));
   const routeA = buildRouteOption({
     id: "A",
-    title: "Route A",
+    title: "Route A (Driving)",
     path: buildRoutePath(fromPoint, toPoint, offset),
     speedBiasMinutes: 2,
     safetyBias: 6,
@@ -2249,22 +2415,43 @@ function generateGpsRoutes(options = {}) {
   });
   const routeB = buildRouteOption({
     id: "B",
-    title: "Route B",
+    title: "Route B (Walking)",
     path: buildRoutePath(fromPoint, toPoint, -offset * 0.6),
-    speedBiasMinutes: -1,
+    speedBiasMinutes: 6,
     safetyBias: 3,
     preferences,
   });
   const routeC = buildRouteOption({
     id: "C",
-    title: "Route C",
+    title: "Route C (Cycling)",
     path: buildRoutePath(fromPoint, toPoint, 0),
-    speedBiasMinutes: -3,
+    speedBiasMinutes: 1,
     safetyBias: -4,
     preferences,
   });
+  routeA.transportProfile = "driving";
+  routeB.transportProfile = "walking";
+  routeC.transportProfile = "cycling";
+  const routeD = buildDerivedTransportRoute({
+    id: "D",
+    title: "Route D (Bus)",
+    mode: "bus",
+    path: routeA.path,
+    etaMinutes: Math.max(8, Math.round(routeA.etaMinutes * 1.18 + 5)),
+    preferences,
+    scoreBias: -2,
+  });
+  const routeE = buildDerivedTransportRoute({
+    id: "E",
+    title: "Route E (Train)",
+    mode: "train",
+    path: routeA.path,
+    etaMinutes: Math.max(7, Math.round(routeA.etaMinutes * 0.96 + 6)),
+    preferences,
+    scoreBias: 1,
+  });
 
-  state.gps.routeChoices = rankGpsRoutes([routeA, routeB, routeC]);
+  state.gps.routeChoices = rankGpsRoutes([routeA, routeB, routeC, routeD, routeE].filter(Boolean));
   state.gps.navigationRouteId = null;
   setGpsRouteSelection(state.gps.routeChoices[0]?.id || "A");
   updateGpsHint();
@@ -2383,19 +2570,18 @@ async function fetchRouteFeedbackRatings() {
     latestByRouteKey[key] = rating;
   });
 
-  state.gps.routeRatings = {
-    ...state.gps.routeRatings,
-    A: latestByRouteKey.A ?? state.gps.routeRatings.A,
-    B: latestByRouteKey.B ?? state.gps.routeRatings.B,
-    C: latestByRouteKey.C ?? state.gps.routeRatings.C,
-  };
-
-  state.routeHistoryRatings = {
-    ...state.routeHistoryRatings,
-    ...Object.fromEntries(
-      Object.entries(latestByRouteKey).filter(([routeKey]) => !["A", "B", "C"].includes(routeKey))
-    ),
-  };
+  const liveRouteRatings = { ...state.gps.routeRatings };
+  const historyRatings = { ...state.routeHistoryRatings };
+  Object.entries(latestByRouteKey).forEach(([routeKey, rating]) => {
+    const isGpsRouteKey = /^[A-Z]\d?$/.test(routeKey);
+    if (isGpsRouteKey) {
+      liveRouteRatings[routeKey] = rating;
+      return;
+    }
+    historyRatings[routeKey] = rating;
+  });
+  state.gps.routeRatings = liveRouteRatings;
+  state.routeHistoryRatings = historyRatings;
 
   renderGpsRouteOptions();
   renderRouteHistory();
@@ -2430,6 +2616,7 @@ function ensureGpsMap() {
     maxZoom: 19,
   }).addTo(mapInstance);
   bindGpsMapEvents();
+  setGpsMapViewMode(state.gps.mapViewMode);
   setTimeout(() => mapInstance.invalidateSize(), 0);
   updateGpsHint();
 
@@ -2497,6 +2684,7 @@ function bindGpsUiEvents() {
   const gpsCommunitySubmitBound = communityRouteForm?.dataset.gpsBound === "true";
   const gpsCommunityListBound = communityRouteList?.dataset.gpsBound === "true";
   const gpsTurnPanelBound = gpsTurnPanel?.dataset.gpsBound === "true";
+  const gpsMapViewBound = gpsRouteMapCard?.dataset.mapViewBound === "true";
 
   if (!gpsRouteOptionsBound) {
     if (routeOptionsContainer) routeOptionsContainer.dataset.gpsBound = "true";
@@ -2622,6 +2810,25 @@ function bindGpsUiEvents() {
       }
       if (actionTarget.dataset.action === "finish-gps-nav") {
         exitGpsNavigation("done");
+      }
+    });
+  }
+
+  if (!gpsMapViewBound) {
+    if (gpsRouteMapCard) gpsRouteMapCard.dataset.mapViewBound = "true";
+    gpsRouteMapCard?.addEventListener("click", (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) return;
+      const actionTarget = target.closest("[data-action^='gps-map-']");
+      if (!(actionTarget instanceof HTMLElement)) return;
+      if (actionTarget.dataset.action === "gps-map-full") {
+        setGpsMapViewMode("full");
+      }
+      if (actionTarget.dataset.action === "gps-map-half") {
+        setGpsMapViewMode("half");
+      }
+      if (actionTarget.dataset.action === "gps-map-embed") {
+        setGpsMapViewMode("embedded");
       }
     });
   }
@@ -3463,7 +3670,7 @@ if (!routeFormAlreadyBound) {
     owner_device_id: deviceId,
     origin: originLabel,
     destination: destinationLabel,
-    route_key: selectedRoute.routeKey === "A" ? "A" : "B",
+    route_key: selectedRoute.routeKey || selectedRoute.id || "A",
     risk_level: selectedRoute.riskLevel,
     eta_minutes: selectedRoute.etaMinutes,
     options: {

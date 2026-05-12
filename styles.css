@@ -735,12 +735,54 @@ fieldset {
     radial-gradient(circle at 82% 74%, rgba(43, 89, 255, 0.18), transparent 38%),
     var(--route-bg);
   border: 1px solid var(--line);
+  transition:
+    height 0.2s ease,
+    inset 0.2s ease,
+    border-radius 0.2s ease,
+    box-shadow 0.2s ease;
 }
 
 #gps-live-map {
   height: 180px;
   width: 100%;
   border-radius: 0.8rem;
+}
+
+.route-map.is-half {
+  position: fixed;
+  left: 0.75rem;
+  right: 0.75rem;
+  bottom: 5.2rem;
+  z-index: 980;
+  box-shadow: 0 14px 30px rgba(15, 23, 42, 0.24);
+}
+
+.route-map.is-full {
+  position: fixed;
+  inset: 0;
+  z-index: 990;
+  border-radius: 0;
+  border: 0;
+  box-shadow: none;
+  padding: 0.9rem;
+}
+
+.route-map.is-half #gps-live-map {
+  height: min(52vh, 420px);
+}
+
+.route-map.is-full #gps-live-map {
+  height: calc(100vh - 7.2rem);
+  border-radius: 0.75rem;
+}
+
+.gps-map-view-controls {
+  position: absolute;
+  top: 0.8rem;
+  right: 0.8rem;
+  z-index: 470;
+  display: flex;
+  gap: 0.35rem;
 }
 
 .gps-map-hint {
@@ -1182,6 +1224,11 @@ body.dark .gps-map-hint {
 
 body.dark .gps-turn-panel {
   background: rgba(15, 24, 41, 0.95);
+}
+
+body.dark .route-map.is-half,
+body.dark .route-map.is-full {
+  background: #0f1829;
 }
 
 @media (max-width: 359px) {

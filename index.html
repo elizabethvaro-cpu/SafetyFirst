@@ -203,13 +203,18 @@
         </section>
 
         <section class="page" id="page-gps" data-page="gps">
-          <section class="route-map card">
+          <section class="route-map card" id="gps-route-map-card">
             <div id="gps-live-map" aria-label="GPS route map"></div>
             <div class="route-dot start"></div>
             <div class="route-dot end"></div>
             <div class="route-line"></div>
             <div class="route-badge start" data-i18n="fromShort">From</div>
             <div class="route-badge end" data-i18n="toShort">To</div>
+            <div class="gps-map-view-controls" aria-label="GPS map view controls">
+              <button type="button" class="tiny-btn" data-action="gps-map-half">Half</button>
+              <button type="button" class="tiny-btn" data-action="gps-map-full">Full</button>
+              <button type="button" class="tiny-btn" data-action="gps-map-embed">Exit Map</button>
+            </div>
             <div class="gps-map-hint" id="gps-map-hint">Tap map to set From and To points.</div>
             <div class="gps-turn-panel hidden" id="gps-turn-panel" aria-live="polite">
               <p id="gps-turn-primary">Select a route and start GPS.</p>
