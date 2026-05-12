@@ -136,8 +136,7 @@ const state = {
     activeRouteId: null,
     currentRouteRiskLevel: null,
     navigationMarker: null,
-    navigationAnimationTimer: null,
-    navigationPathIndex: 0,
+    lastNavigationLatLng: null,
     schemaHasCommunityTables: true,
     schemaHasRouteFeedbackTable: true,
     clickStage: "from",
@@ -1274,12 +1273,13 @@ function buildOsrmRouteOption({
   const distanceKm = Math.max(0.05, (Number(routeData.distance) || 0) / 1000);
   const speedKmh = profile === "walking" ? 4.8 : profile === "cycling" ? 14 : 28;
   const profileEstimatedMinutes = Math.max(1, Math.round((distanceKm / speedKmh) * 60));
-  const etaMinutes = Math.max(
-    4,
-    (profile === "driving"
-      ? Math.max(osrmMinutes, profileEstimatedMinutes)
-      : Math.max(profileEstimatedMinutes, osrmMinutes)) + speedBiasMinutes
-  );
+  const boundedModeMinutes =
+    profile === "walking"
+      ? Math.min(Math.max(profileEstimatedMinutes, osrmMinutes), profileEstimatedMinutes + 8)
+      : profile === "cycling"
+        ? Math.min(Math.max(profileEstimatedMinutes, osrmMinutes), profileEstimatedMinutes + 6)
+        : Math.max(osrmMinutes, profileEstimatedMinutes);
+  const etaMinutes = Math.max(4, boundedModeMinutes + speedBiasMinutes);
   const adjustedScore = Math.max(0, Math.min(100, metrics.score + scoreBias));
   const riskLevel = adjustedScore >= 72 ? "low" : adjustedScore >= 48 ? "medium" : "high";
   const directions =
@@ -1382,15 +1382,30 @@ async function tryBuildRealGpsRoutes(fromPoint, toPoint, preferences) {
     .filter(Boolean);
 
   const drivingOption = builtRoutes.find((route) => route.transportProfile === "driving");
-  if (drivingOption) {
-    builtRoutes.forEach((route) => {
-      if (route.transportProfile === "walking") {
-        route.etaMinutes = Math.max(route.etaMinutes, drivingOption.etaMinutes + 4);
+  const directWalkMinutes = Math.max(4, Math.round((straightDistance / 1000 / 4.9) * 60));
+  const directCycleMinutes = Math.max(3, Math.round((straightDistance / 1000 / 13.5) * 60));
+  builtRoutes.forEach((route) => {
+    if (route.transportProfile === "walking") {
+      route.etaMinutes = Math.max(4, Math.min(route.etaMinutes, directWalkMinutes + 4));
+    }
+    if (route.transportProfile === "cycling") {
+      route.etaMinutes = Math.max(3, Math.min(route.etaMinutes, directCycleMinutes + 3));
+    }
+  });
+  if (drivingOption && straightDistance > 700) {
+    const walkingOption = builtRoutes.find((route) => route.transportProfile === "walking");
+    if (walkingOption && walkingOption.etaMinutes <= drivingOption.etaMinutes) {
+      walkingOption.etaMinutes = drivingOption.etaMinutes + 2;
+    }
+  }
+  const routePair = builtRoutes.slice(0, 3);
+  for (let i = 0; i < routePair.length; i += 1) {
+    for (let j = i + 1; j < routePair.length; j += 1) {
+      if (routePair[i].transportProfile === routePair[j].transportProfile) continue;
+      if (routePair[i].etaMinutes === routePair[j].etaMinutes) {
+        routePair[j].etaMinutes += 1;
       }
-      if (route.transportProfile === "cycling") {
-        route.etaMinutes = Math.max(route.etaMinutes, drivingOption.etaMinutes + 1);
-      }
-    });
+    }
   }
   return builtRoutes;
 }
@@ -1526,26 +1541,55 @@ function focusGpsRouteOnMap(route) {
   });
 }
 
-function stopGpsNavigationAnimation() {
-  if (state.gps.navigationAnimationTimer) {
-    window.clearInterval(state.gps.navigationAnimationTimer);
-    state.gps.navigationAnimationTimer = null;
+function removeGpsNavigationGuide() {
+  if (state.gps.navigationMarker && state.gps.map) {
+    state.gps.map.removeLayer(state.gps.navigationMarker);
   }
+  state.gps.navigationMarker = null;
+  state.gps.lastNavigationLatLng = null;
 }
 
-function renderGpsNavigationGuide(route) {
-  if (!state.gps.map || !route?.path?.length) {
-    stopGpsNavigationAnimation();
-    if (state.gps.navigationMarker) {
-      state.gps.map?.removeLayer(state.gps.navigationMarker);
-      state.gps.navigationMarker = null;
+function getActiveGpsRoute() {
+  return state.gps.routeChoices.find((route) => route.id === state.gps.activeRouteId) || null;
+}
+
+function getClosestPointOnRoute(latlng, routePath) {
+  if (!latlng || !Array.isArray(routePath) || !routePath.length) return latlng;
+  let closestPoint = routePath[0];
+  let closestDistance = Number.POSITIVE_INFINITY;
+  routePath.forEach((point) => {
+    const pointDistance = distanceMeters(latlng.lat, latlng.lng, point.lat, point.lng);
+    if (pointDistance < closestDistance) {
+      closestDistance = pointDistance;
+      closestPoint = point;
     }
+  });
+  return closestPoint;
+}
+
+function updateGpsNavigationMarker(latlng, options = {}) {
+  if (!state.gps.map || !latlng) return;
+  const activeRoute = getActiveGpsRoute();
+  const markerLatLng =
+    options.snapToRoute && activeRoute?.path?.length
+      ? getClosestPointOnRoute(latlng, activeRoute.path)
+      : latlng;
+
+  if (
+    !options.force &&
+    state.gps.lastNavigationLatLng &&
+    distanceMeters(
+      markerLatLng.lat,
+      markerLatLng.lng,
+      state.gps.lastNavigationLatLng.lat,
+      state.gps.lastNavigationLatLng.lng
+    ) < 4
+  ) {
     return;
   }
 
-  const startPoint = route.path[0];
   if (!state.gps.navigationMarker) {
-    state.gps.navigationMarker = L.marker(startPoint, {
+    state.gps.navigationMarker = L.marker(markerLatLng, {
       icon: L.divIcon({
         className: "gps-navigation-pin-wrap",
         html: '<span class="gps-navigation-pin"></span>',
@@ -1555,27 +1599,25 @@ function renderGpsNavigationGuide(route) {
       zIndexOffset: 700,
     }).addTo(state.gps.map);
   } else {
-    safeSetLatLng(state.gps.navigationMarker, startPoint);
+    safeSetLatLng(state.gps.navigationMarker, markerLatLng);
   }
+  state.gps.lastNavigationLatLng = markerLatLng;
 
-  const nextInstruction = route.directions?.[0]?.instruction || "Follow the highlighted route.";
+  const nextInstruction = activeRoute?.directions?.[0]?.instruction || "Follow the highlighted route.";
   state.gps.navigationMarker.bindTooltip(`GPS: ${nextInstruction}`, {
     permanent: false,
     direction: "top",
     offset: [0, -10],
   });
+}
 
-  stopGpsNavigationAnimation();
-  state.gps.navigationPathIndex = 0;
-  state.gps.navigationAnimationTimer = window.setInterval(() => {
-    if (!state.gps.navigationMarker || !route.path.length) return;
-    const nextIndex = Math.min(route.path.length - 1, state.gps.navigationPathIndex + 2);
-    state.gps.navigationPathIndex = nextIndex;
-    safeSetLatLng(state.gps.navigationMarker, route.path[nextIndex]);
-    if (nextIndex >= route.path.length - 1) {
-      stopGpsNavigationAnimation();
-    }
-  }, 900);
+function renderGpsNavigationGuide(route) {
+  if (!state.gps.map || !route?.path?.length) {
+    removeGpsNavigationGuide();
+    return;
+  }
+  const anchor = state.gps.userLatLng || route.path[0];
+  updateGpsNavigationMarker(anchor, { snapToRoute: true, force: true });
 }
 
 function drawGpsRoutesOnMap() {
@@ -1990,6 +2032,7 @@ function ensureGpsMap() {
       } else {
         safeSetLatLng(state.gps.userMarker, latlng);
       }
+      updateGpsNavigationMarker(latlng, { snapToRoute: true, force: true });
       if (!state.gps.fromLatLng) {
         setGpsWaypoint(latlng, "from");
       }
@@ -2016,6 +2059,7 @@ function ensureGpsMap() {
       } else {
         safeSetLatLng(state.gps.userMarker, latlng);
       }
+      updateGpsNavigationMarker(latlng, { snapToRoute: true });
       const gpsPageActive = document.querySelector(".page.active")?.dataset.page === "gps";
       if (gpsPageActive && !state.gps.fromLatLng) {
         mapInstance.panTo(latlng, { animate: true, duration: 0.3 });
