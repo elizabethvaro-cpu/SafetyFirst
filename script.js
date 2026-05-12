@@ -4,6 +4,25 @@ const navItems = [...document.querySelectorAll(".nav-item")];
 const toast = document.getElementById("toast");
 const themeSelect = document.getElementById("theme-select");
 const languageSelect = document.getElementById("language-select");
+const routeForm = document.getElementById("route-form");
+const routeOriginInput = document.getElementById("origin");
+const routeDestinationInput = document.getElementById("destination");
+const routePreferenceInputs = [...document.querySelectorAll("#route-form fieldset input")];
+const routeOptionsContainer = document.getElementById("route-options");
+const routeMapSvg = document.getElementById("route-map-svg");
+const routePathLayer = document.getElementById("route-path-layer");
+const routeMarkerLayer = document.getElementById("route-marker-layer");
+const routeHazardLayer = document.getElementById("route-hazard-layer");
+const routeMapLegend = document.getElementById("route-map-legend");
+const routeDirectionsList = document.getElementById("route-directions-list");
+const routeSummaryText = document.getElementById("route-summary-text");
+const activeRouteChip = document.getElementById("active-route-chip");
+
+const routeState = {
+  hazards: [],
+  choices: [],
+  activeRouteId: null,
+};
 
 const labels = {
   map: "Safety Map",
@@ -291,6 +310,346 @@ function applyLanguage(language) {
   pageTitle.textContent = selected[`${activePage}Title`] || labels[activePage];
 }
 
+function hashString(value) {
+  let hash = 0;
+  const normalized = String(value || "");
+  for (let i = 0; i < normalized.length; i += 1) {
+    hash = (hash << 5) - hash + normalized.charCodeAt(i);
+    hash |= 0;
+  }
+  return Math.abs(hash);
+}
+
+function toPointFromSeed(seed, xShift = 0, yShift = 0) {
+  const hash = hashString(seed);
+  const x = 16 + ((hash % 7000) / 7000) * 68 + xShift;
+  const y = 16 + (((Math.floor(hash / 7000) % 7000) / 7000) * 68 + yShift);
+  return {
+    x: Math.max(8, Math.min(92, x)),
+    y: Math.max(8, Math.min(92, y)),
+  };
+}
+
+function toPathString(points) {
+  if (!points.length) return "";
+  return points
+    .map((point, index) => `${index === 0 ? "M" : "L"} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`)
+    .join(" ");
+}
+
+function buildCurveRoute(start, destination, bendStrength = 0) {
+  const midpoint = {
+    x: (start.x + destination.x) / 2,
+    y: (start.y + destination.y) / 2,
+  };
+  const vector = {
+    x: destination.x - start.x,
+    y: destination.y - start.y,
+  };
+  const length = Math.max(Math.sqrt(vector.x * vector.x + vector.y * vector.y), 0.01);
+  const normal = {
+    x: -vector.y / length,
+    y: vector.x / length,
+  };
+  const control = {
+    x: midpoint.x + normal.x * bendStrength,
+    y: midpoint.y + normal.y * bendStrength,
+  };
+  const points = [];
+  const samples = 20;
+  for (let index = 0; index <= samples; index += 1) {
+    const t = index / samples;
+    const inv = 1 - t;
+    const x = inv * inv * start.x + 2 * inv * t * control.x + t * t * destination.x;
+    const y = inv * inv * start.y + 2 * inv * t * control.y + t * t * destination.y;
+    points.push({ x, y });
+  }
+  return points;
+}
+
+function pointToSegmentDistance(point, start, end) {
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  if (dx === 0 && dy === 0) {
+    const px = point.x - start.x;
+    const py = point.y - start.y;
+    return Math.sqrt(px * px + py * py);
+  }
+  const t = Math.max(
+    0,
+    Math.min(1, ((point.x - start.x) * dx + (point.y - start.y) * dy) / (dx * dx + dy * dy))
+  );
+  const projection = {
+    x: start.x + t * dx,
+    y: start.y + t * dy,
+  };
+  const px = point.x - projection.x;
+  const py = point.y - projection.y;
+  return Math.sqrt(px * px + py * py);
+}
+
+function computePathDistanceKm(points) {
+  let total = 0;
+  for (let index = 1; index < points.length; index += 1) {
+    const dx = points[index].x - points[index - 1].x;
+    const dy = points[index].y - points[index - 1].y;
+    total += Math.sqrt(dx * dx + dy * dy);
+  }
+  return Number((total * 0.34).toFixed(1));
+}
+
+function compassLabel(fromPoint, toPoint) {
+  const angle = (Math.atan2(toPoint.y - fromPoint.y, toPoint.x - fromPoint.x) * 180) / Math.PI;
+  if (angle >= -22.5 && angle < 22.5) return "east";
+  if (angle >= 22.5 && angle < 67.5) return "south-east";
+  if (angle >= 67.5 && angle < 112.5) return "south";
+  if (angle >= 112.5 && angle < 157.5) return "south-west";
+  if (angle >= 157.5 || angle < -157.5) return "west";
+  if (angle >= -157.5 && angle < -112.5) return "north-west";
+  if (angle >= -112.5 && angle < -67.5) return "north";
+  return "north-east";
+}
+
+function buildRouteSteps(route, originLabel, destinationLabel) {
+  const points = route.points;
+  const sectionSize = Math.max(4, Math.floor(points.length / 4));
+  const checkpoints = [
+    points[0],
+    points[Math.min(points.length - 1, sectionSize)],
+    points[Math.min(points.length - 1, sectionSize * 2)],
+    points[Math.min(points.length - 1, sectionSize * 3)],
+    points[points.length - 1],
+  ];
+  return [
+    {
+      instruction: `Head ${compassLabel(checkpoints[0], checkpoints[1])} from ${originLabel}.`,
+      distance: `${Math.max(0.4, route.distanceKm * 0.22).toFixed(1)} km`,
+      duration: `${Math.max(2, Math.round(route.etaMinutes * 0.2))} min`,
+    },
+    {
+      instruction: `Continue on the ${route.riskLevel === "low" ? "well-lit" : "main"} corridor.`,
+      distance: `${Math.max(0.6, route.distanceKm * 0.34).toFixed(1)} km`,
+      duration: `${Math.max(3, Math.round(route.etaMinutes * 0.32))} min`,
+    },
+    {
+      instruction:
+        route.transitMode === "train"
+          ? `Take ${route.transitLabel} for ${route.transitStops} stops.`
+          : `Take ${route.transitLabel} for ${route.transitStops} stops.`,
+      distance: `${Math.max(0.8, route.distanceKm * 0.3).toFixed(1)} km`,
+      duration: `${Math.max(4, Math.round(route.etaMinutes * 0.3))} min`,
+    },
+    {
+      instruction: `Walk ${compassLabel(checkpoints[3], checkpoints[4])} and arrive at ${destinationLabel}.`,
+      distance: `${Math.max(0.2, route.distanceKm * 0.14).toFixed(1)} km`,
+      duration: `${Math.max(2, Math.round(route.etaMinutes * 0.18))} min`,
+    },
+  ];
+}
+
+function riskClassName(riskLevel) {
+  if (riskLevel === "low") return "low";
+  if (riskLevel === "high") return "high";
+  return "medium";
+}
+
+function computeRouteRisk(points, hazards, preferenceFlags) {
+  let riskPoints = 0;
+  hazards.forEach((hazard) => {
+    let bestDistance = Infinity;
+    for (let i = 1; i < points.length; i += 1) {
+      const distance = pointToSegmentDistance(hazard, points[i - 1], points[i]);
+      if (distance < bestDistance) bestDistance = distance;
+    }
+    if (bestDistance < 6) riskPoints += 35;
+    else if (bestDistance < 10) riskPoints += 19;
+    else if (bestDistance < 14) riskPoints += 10;
+  });
+  const preferenceBonus =
+    (preferenceFlags.wellLit ? 8 : 0) +
+    (preferenceFlags.avoidIsolated ? 7 : 0) +
+    (preferenceFlags.avoidTraffic ? 4 : 0);
+  const safetyScore = Math.max(5, Math.min(98, Math.round(100 - riskPoints + preferenceBonus)));
+  const riskLevel = safetyScore >= 72 ? "low" : safetyScore >= 50 ? "medium" : "high";
+  return { safetyScore, riskLevel };
+}
+
+function buildRouteChoices(originLabel, destinationLabel, preferenceFlags) {
+  const from = toPointFromSeed(originLabel || "start", -3, 4);
+  const to = toPointFromSeed(destinationLabel || "destination", 4, -5);
+  routeState.hazards = [
+    toPointFromSeed(`${originLabel}-hazard-1`, 0, -8),
+    toPointFromSeed(`${destinationLabel}-hazard-2`, -9, 1),
+    toPointFromSeed(`${originLabel}-${destinationLabel}-hazard-3`, 8, 5),
+  ];
+  const variants = [
+    { id: "A", bend: 9, speedBias: 3, mode: "train", transit: "Train Green Line", stops: 4 },
+    { id: "B", bend: -4, speedBias: 0, mode: "bus", transit: "Bus 22", stops: 5 },
+    { id: "C", bend: 1, speedBias: -2, mode: "bus", transit: "Bus 7 Express", stops: 3 },
+  ];
+
+  const rawRoutes = variants.map((variant) => {
+    const points = buildCurveRoute(from, to, variant.bend);
+    const distanceKm = computePathDistanceKm(points);
+    const baselineMinutes = Math.max(7, Math.round(distanceKm * 5.2));
+    const etaMinutes = Math.max(6, baselineMinutes + variant.speedBias);
+    const risk = computeRouteRisk(points, routeState.hazards, preferenceFlags);
+    const speedScore = 100 - Math.max(0, etaMinutes - 8) * 5;
+    const priorityScore = Math.round(risk.safetyScore * 0.7 + speedScore * 0.3);
+    return {
+      id: variant.id,
+      title: `Route ${variant.id}`,
+      points,
+      distanceKm,
+      etaMinutes,
+      safetyScore: risk.safetyScore,
+      riskLevel: risk.riskLevel,
+      priorityScore,
+      transitMode: variant.mode,
+      transitLabel: variant.transit,
+      transitStops: variant.stops,
+    };
+  });
+
+  const riskWeight = { low: 0, medium: 1, high: 2 };
+  const ranked = rawRoutes.sort((left, right) => {
+    if (riskWeight[left.riskLevel] !== riskWeight[right.riskLevel]) {
+      return riskWeight[left.riskLevel] - riskWeight[right.riskLevel];
+    }
+    if (right.priorityScore !== left.priorityScore) {
+      return right.priorityScore - left.priorityScore;
+    }
+    return left.etaMinutes - right.etaMinutes;
+  });
+
+  ranked.forEach((route) => {
+    route.steps = buildRouteSteps(route, originLabel, destinationLabel);
+  });
+  return { routes: ranked, from, to };
+}
+
+function renderRouteMap(activeRouteId, startPoint, destinationPoint) {
+  if (!routePathLayer || !routeMarkerLayer || !routeHazardLayer) return;
+  routeHazardLayer.innerHTML = routeState.hazards
+    .map(
+      (hazard) =>
+        `<circle cx="${hazard.x.toFixed(2)}" cy="${hazard.y.toFixed(2)}" r="1.8" class="route-hazard-dot"></circle>`
+    )
+    .join("");
+
+  routePathLayer.innerHTML = routeState.choices
+    .map((route) => {
+      const activeClass = route.id === activeRouteId ? "active" : "";
+      return `<path data-route-id="${route.id}" class="route-svg-path ${riskClassName(route.riskLevel)} ${activeClass}" d="${toPathString(
+        route.points
+      )}"></path>`;
+    })
+    .join("");
+
+  routeMarkerLayer.innerHTML = `
+    <circle cx="${startPoint.x.toFixed(2)}" cy="${startPoint.y.toFixed(2)}" r="2.2" class="route-map-start"></circle>
+    <circle cx="${destinationPoint.x.toFixed(2)}" cy="${destinationPoint.y.toFixed(2)}" r="2.2" class="route-map-end"></circle>
+  `;
+}
+
+function renderRouteCards() {
+  if (!routeOptionsContainer) return;
+  if (!routeState.choices.length) {
+    routeOptionsContainer.innerHTML = `<div class="route-empty-state">No routes available yet.</div>`;
+    return;
+  }
+
+  routeOptionsContainer.innerHTML = routeState.choices
+    .map((route, index) => {
+      const isActive = route.id === routeState.activeRouteId;
+      const badge = index === 0 ? `<span class="route-priority">Best safe + fast</span>` : "";
+      return `
+      <article class="route-option ${isActive ? "active" : ""}" data-route-id="${route.id}">
+        <div class="route-option-head">
+          <strong>${route.title}</strong>
+          ${badge}
+        </div>
+        <small>${route.etaMinutes} min • ${route.distanceKm.toFixed(1)} km • ${route.riskLevel} risk</small>
+        <small>Safety ${route.safetyScore}/100 • ${route.transitLabel}</small>
+      </article>`;
+    })
+    .join("");
+}
+
+function renderDirections() {
+  const activeRoute = routeState.choices.find((route) => route.id === routeState.activeRouteId);
+  if (!activeRoute) {
+    if (routeDirectionsList) {
+      routeDirectionsList.innerHTML =
+        '<li class="route-empty-state">Directions will appear here after selecting a route.</li>';
+    }
+    if (routeSummaryText) routeSummaryText.textContent = "Pick a route to see directions.";
+    if (activeRouteChip) activeRouteChip.textContent = "No route selected";
+    return;
+  }
+
+  if (activeRouteChip) {
+    activeRouteChip.textContent = `${activeRoute.title} • ${activeRoute.etaMinutes} min`;
+  }
+  if (routeSummaryText) {
+    routeSummaryText.textContent =
+      `${activeRoute.riskLevel.toUpperCase()} risk • Safety ${activeRoute.safetyScore}/100 • ` +
+      `${activeRoute.distanceKm.toFixed(1)} km`;
+  }
+  if (routeDirectionsList) {
+    routeDirectionsList.innerHTML = activeRoute.steps
+      .map(
+        (step) => `
+        <li>
+          <span>${step.instruction}</span>
+          <small>${step.distance} • ${step.duration}</small>
+        </li>`
+      )
+      .join("");
+  }
+}
+
+function selectRoute(routeId) {
+  if (!routeState.choices.some((route) => route.id === routeId)) return;
+  routeState.activeRouteId = routeId;
+  const activeRoute = routeState.choices.find((route) => route.id === routeId);
+  if (routeMapLegend && activeRoute) {
+    routeMapLegend.textContent = `${activeRoute.title} selected: ${activeRoute.transitLabel}, ${activeRoute.etaMinutes} min, ${activeRoute.riskLevel} risk.`;
+  }
+  const startPoint = routeState.choices[0]?.points[0];
+  const destinationPoint = routeState.choices[0]?.points[routeState.choices[0].points.length - 1];
+  if (startPoint && destinationPoint) {
+    renderRouteMap(routeId, startPoint, destinationPoint);
+  }
+  renderRouteCards();
+  renderDirections();
+}
+
+function generateAndRenderRoutes() {
+  const originText = routeOriginInput?.value.trim();
+  const destinationText = routeDestinationInput?.value.trim();
+  if (!originText || !destinationText) {
+    showToast("Please provide both start and destination.");
+    return false;
+  }
+
+  const preferences = {
+    wellLit: Boolean(routePreferenceInputs[0]?.checked),
+    avoidIsolated: Boolean(routePreferenceInputs[1]?.checked),
+    avoidTraffic: Boolean(routePreferenceInputs[2]?.checked),
+  };
+  const generated = buildRouteChoices(originText, destinationText, preferences);
+  routeState.choices = generated.routes;
+  routeState.activeRouteId = generated.routes[0]?.id || null;
+  renderRouteMap(routeState.activeRouteId, generated.from, generated.to);
+  renderRouteCards();
+  renderDirections();
+  if (routeState.activeRouteId) {
+    selectRoute(routeState.activeRouteId);
+  }
+  return true;
+}
+
 navItems.forEach((item) => {
   item.addEventListener("click", () => switchPage(item.dataset.target));
 });
@@ -303,12 +662,15 @@ document.querySelectorAll("#incident-chip-row .chip").forEach((chip) => {
   });
 });
 
-document.querySelectorAll("#route-options .route-option").forEach((option) => {
-  option.addEventListener("click", () => {
-    document
-      .querySelectorAll("#route-options .route-option")
-      .forEach((other) => other.classList.toggle("active", other === option));
-  });
+routeOptionsContainer?.addEventListener("click", (event) => {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) return;
+  const card = target.closest(".route-option");
+  if (!(card instanceof HTMLElement)) return;
+  const routeId = card.dataset.routeId;
+  if (routeId) {
+    selectRoute(routeId);
+  }
 });
 
 document.getElementById("report-form").addEventListener("submit", (event) => {
@@ -320,9 +682,19 @@ document.getElementById("report-form").addEventListener("submit", (event) => {
   showToast((copy[languageSelect.value] || copy.en).reportSent);
 });
 
-document.getElementById("route-form").addEventListener("submit", (event) => {
+routeForm?.addEventListener("submit", (event) => {
   event.preventDefault();
-  showToast((copy[languageSelect.value] || copy.en).routeReady);
+  const generated = generateAndRenderRoutes();
+  if (generated) {
+    showToast((copy[languageSelect.value] || copy.en).routeReady);
+  }
+});
+
+routePathLayer?.addEventListener("click", (event) => {
+  const target = event.target;
+  if (!(target instanceof SVGPathElement)) return;
+  const routeId = target.dataset.routeId;
+  if (routeId) selectRoute(routeId);
 });
 
 document
@@ -362,3 +734,9 @@ languageSelect.addEventListener("change", () => {
 });
 
 applyLanguage("en");
+
+if (routeOriginInput && routeDestinationInput) {
+  if (!routeOriginInput.value.trim()) routeOriginInput.value = "Current Location";
+  if (!routeDestinationInput.value.trim()) routeDestinationInput.value = "City Center";
+  generateAndRenderRoutes();
+}

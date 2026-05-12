@@ -458,6 +458,74 @@ fieldset {
   border: 1px solid var(--line);
 }
 
+#route-map-svg {
+  width: 100%;
+  height: 180px;
+  border-radius: 0.8rem;
+  display: block;
+}
+
+.route-map-bg {
+  fill: rgba(255, 255, 255, 0.65);
+}
+
+.route-svg-path {
+  fill: none;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.45;
+  cursor: pointer;
+}
+
+.route-svg-path.low {
+  stroke: #16a34a;
+}
+
+.route-svg-path.medium {
+  stroke: #eab308;
+}
+
+.route-svg-path.high {
+  stroke: #dc2626;
+}
+
+.route-svg-path.active {
+  opacity: 0.96;
+  stroke-width: 2.4;
+  filter: drop-shadow(0 0 4px rgba(15, 23, 42, 0.3));
+}
+
+.route-hazard-dot {
+  fill: #f97316;
+  opacity: 0.8;
+}
+
+.route-map-start {
+  fill: #16a34a;
+  stroke: #fff;
+  stroke-width: 0.9;
+}
+
+.route-map-end {
+  fill: #dc2626;
+  stroke: #fff;
+  stroke-width: 0.9;
+}
+
+.route-map-legend {
+  position: absolute;
+  left: 0.7rem;
+  right: 0.7rem;
+  bottom: 0.55rem;
+  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid var(--line);
+  border-radius: 0.7rem;
+  padding: 0.4rem 0.55rem;
+  font-size: 0.74rem;
+  color: var(--muted);
+}
+
 .route-dot {
   position: absolute;
   width: 15px;
@@ -518,11 +586,65 @@ fieldset {
   background: #fff;
   padding: 0.55rem 0.65rem;
   color: var(--text);
+  cursor: pointer;
+}
+
+.route-option-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.route-option small {
+  display: block;
+  margin-top: 0.2rem;
+}
+
+.route-priority {
+  font-size: 0.66rem;
+  border-radius: 999px;
+  background: #e0e7ff;
+  color: #1d4ed8;
+  padding: 0.2rem 0.45rem;
 }
 
 .route-option.active {
   border-color: #9eb0ff;
   background: #f4f7ff;
+}
+
+.route-chip {
+  font-size: 0.7rem;
+  border-radius: 999px;
+  padding: 0.2rem 0.48rem;
+  border: 1px solid var(--line);
+  color: var(--muted);
+}
+
+.route-directions-list {
+  margin: 0;
+  padding-left: 1.1rem;
+  display: grid;
+  gap: 0.65rem;
+}
+
+.route-directions-list li {
+  color: var(--text);
+}
+
+.route-directions-list small {
+  display: block;
+  margin-top: 0.16rem;
+  color: var(--muted);
+}
+
+.route-empty-state {
+  border: 1px dashed var(--line);
+  border-radius: 0.7rem;
+  padding: 0.65rem;
+  font-size: 0.82rem;
+  color: var(--muted);
 }
 
 .profile-card {
@@ -611,6 +733,15 @@ body.dark {
 
 body.dark .map-overlay.bottom {
   background: rgba(21, 31, 51, 0.94);
+}
+
+body.dark .route-map-legend {
+  background: rgba(15, 24, 41, 0.95);
+}
+
+body.dark .route-priority {
+  background: rgba(59, 130, 246, 0.22);
+  color: #bfdbfe;
 }
 
 body.dark input,

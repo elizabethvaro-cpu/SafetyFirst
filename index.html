@@ -168,11 +168,17 @@
 
         <section class="page" id="page-gps" data-page="gps">
           <section class="route-map card">
-            <div class="route-dot start"></div>
-            <div class="route-dot end"></div>
-            <div class="route-line"></div>
+            <svg id="route-map-svg" viewBox="0 0 100 100" role="img" aria-label="Route preview map">
+              <rect x="0" y="0" width="100" height="100" class="route-map-bg"></rect>
+              <g id="route-hazard-layer"></g>
+              <g id="route-path-layer"></g>
+              <g id="route-marker-layer"></g>
+            </svg>
             <div class="route-badge start" data-i18n="fromShort">From</div>
             <div class="route-badge end" data-i18n="toShort">To</div>
+            <div class="route-map-legend" id="route-map-legend">
+              Select a route card to view full directions.
+            </div>
           </section>
 
           <form class="card form-card" id="route-form">
@@ -198,20 +204,26 @@
             </fieldset>
 
             <div class="route-options" id="route-options">
-              <button type="button" class="route-option active">
-                <strong data-i18n="routeOptionOne">Route A</strong>
-                <small data-i18n="routeOptionOneMeta">14 min • Low risk</small>
-              </button>
-              <button type="button" class="route-option">
-                <strong data-i18n="routeOptionTwo">Route B</strong>
-                <small data-i18n="routeOptionTwoMeta">11 min • Medium risk</small>
-              </button>
+              <div class="route-empty-state">Enter From and To, then tap "Find Safest Route".</div>
             </div>
 
             <button class="primary-btn" type="submit">
               <span data-i18n="findSafeRoute">Find Safest Route</span>
             </button>
           </form>
+
+          <section class="card form-card" id="route-directions-card">
+            <div class="card-head">
+              <h2>Directions</h2>
+              <span id="active-route-chip" class="route-chip">No route selected</span>
+            </div>
+            <p id="route-summary-text" class="subtle">
+              Pick a route to see turn-by-turn directions similar to GPS navigation.
+            </p>
+            <ol id="route-directions-list" class="route-directions-list">
+              <li class="route-empty-state">Directions will appear here after selecting a route.</li>
+            </ol>
+          </section>
         </section>
 
         <section class="page" id="page-settings" data-page="settings">
