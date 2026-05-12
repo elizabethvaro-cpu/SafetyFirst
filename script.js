@@ -79,6 +79,8 @@ const GPS_NEARBY_FALLBACK_MAX_METERS = 2300;
 const GPS_MAX_VISIBLE_DIRECTIONS = 8;
 const GPS_OSRM_BASE_URL = "https://router.project-osrm.org";
 const GPS_OSRM_TIMEOUT_MS = 4500;
+const GPS_REVERSE_GEOCODE_URL = "https://nominatim.openstreetmap.org/reverse";
+const GPS_REVERSE_GEOCODE_TIMEOUT_MS = 3500;
 
 const labels = {
   map: "Safety Map",
@@ -141,6 +143,11 @@ const state = {
     feedbackRealtimeChannel: null,
     userPositionWatchId: null,
     routeRequestToken: 0,
+    placeNameCache: {},
+    reverseLookupTokens: {
+      from: 0,
+      to: 0,
+    },
   },
 };
 
@@ -858,6 +865,84 @@ function formatGpsLatLng(latlng) {
   return `${latlng.lat.toFixed(4)}, ${latlng.lng.toFixed(4)}`;
 }
 
+function normalizeStreetLabelFromAddress(address) {
+  if (!address || typeof address !== "object") return "";
+  const road = address.road || address.pedestrian || address.footway || address.cycleway;
+  const number = address.house_number;
+  const area =
+    address.neighbourhood ||
+    address.suburb ||
+    address.city_district ||
+    address.city ||
+    address.town ||
+    address.village;
+  const firstPart = [number, road].filter(Boolean).join(" ").trim() || road || "";
+  if (firstPart && area) return `${firstPart}, ${area}`;
+  return firstPart || area || "";
+}
+
+async function fetchStreetNameForLatLng(latlng) {
+  if (!latlng) return "";
+  const cacheKey = `${latlng.lat.toFixed(4)},${latlng.lng.toFixed(4)}`;
+  if (state.gps.placeNameCache[cacheKey]) return state.gps.placeNameCache[cacheKey];
+
+  const query = new URLSearchParams({
+    format: "jsonv2",
+    lat: String(latlng.lat),
+    lon: String(latlng.lng),
+    zoom: "18",
+    addressdetails: "1",
+  });
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), GPS_REVERSE_GEOCODE_TIMEOUT_MS);
+  try {
+    const response = await fetch(`${GPS_REVERSE_GEOCODE_URL}?${query.toString()}`, {
+      signal: controller.signal,
+      headers: {
+        Accept: "application/json",
+      },
+    });
+    if (!response.ok) return "";
+    const payload = await response.json();
+    const normalized =
+      normalizeStreetLabelFromAddress(payload?.address) ||
+      String(payload?.display_name || "")
+        .split(",")
+        .slice(0, 2)
+        .join(", ")
+        .trim();
+    if (!normalized) return "";
+    state.gps.placeNameCache[cacheKey] = normalized;
+    return normalized;
+  } catch {
+    return "";
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
+}
+
+function setGpsInputStreetName(latlng, pointType, options = {}) {
+  const inputEl = pointType === "from" ? routeOriginInput : routeDestinationInput;
+  if (!inputEl || !latlng) return;
+  const preserveExistingName = Boolean(options.preserveExistingName);
+  const existingValue = inputEl.value.trim();
+  const existingIsCoordinates = Boolean(parseGpsCoordinates(existingValue));
+  if (preserveExistingName && existingValue && !existingIsCoordinates) {
+    return;
+  }
+
+  const fallbackLabel = pointType === "from" ? "Current street" : "Destination street";
+  inputEl.value = fallbackLabel;
+  const tokenKey = pointType === "from" ? "from" : "to";
+  const requestToken = (state.gps.reverseLookupTokens[tokenKey] || 0) + 1;
+  state.gps.reverseLookupTokens[tokenKey] = requestToken;
+  void (async () => {
+    const streetName = await fetchStreetNameForLatLng(latlng);
+    if (state.gps.reverseLookupTokens[tokenKey] !== requestToken) return;
+    inputEl.value = streetName || fallbackLabel;
+  })();
+}
+
 function getGpsPreferenceWeights() {
   return {
     wellLit: Boolean(routePreferenceInputs[0]?.checked),
@@ -1157,43 +1242,78 @@ function buildOsrmRouteOption({
 async function tryBuildRealGpsRoutes(fromPoint, toPoint, preferences) {
   const straightDistance = distanceMeters(fromPoint.lat, fromPoint.lng, toPoint.lat, toPoint.lng);
   const profiles = new Set(["driving"]);
-  if (straightDistance <= 3500) profiles.add("walking");
+  if (straightDistance <= 6000) profiles.add("walking");
   if (preferences.avoidTraffic) profiles.add("cycling");
 
   const routeBatches = await Promise.all(
     [...profiles].map(async (profile) => {
       const routes = await fetchOsrmRoutes(fromPoint, toPoint, profile);
-      return routes.map((routeData) => ({ routeData, profile }));
+      const sortedByDuration = routes
+        .map((routeData, index) => ({ routeData, profile, index }))
+        .sort(
+          (left, right) => (Number(left.routeData.duration) || Infinity) - (Number(right.routeData.duration) || Infinity)
+        );
+      return sortedByDuration;
     })
   );
 
-  const flatRoutes = routeBatches.flat();
-  if (!flatRoutes.length) return [];
-  const idOrder = ["A", "B", "C"];
-  const biasByProfile = {
-    driving: { score: 0, speed: 0 },
-    walking: { score: preferences.wellLit ? 4 : 1, speed: 1 },
-    cycling: { score: preferences.avoidTraffic ? 5 : 2, speed: -1 },
+  const routeMap = Object.fromEntries(routeBatches.flat().map((entry) => [entry.profile, []]));
+  routeBatches.flat().forEach((entry) => {
+    if (!routeMap[entry.profile]) {
+      routeMap[entry.profile] = [];
+    }
+    routeMap[entry.profile].push(entry);
+  });
+
+  const selectedEntries = [];
+  const usedEntries = new Set();
+  const trySelect = (profile, preferredIndex = 0) => {
+    const options = routeMap[profile] || [];
+    const candidate = options[preferredIndex];
+    if (!candidate) return;
+    const key = `${profile}:${candidate.index}`;
+    if (usedEntries.has(key)) return;
+    usedEntries.add(key);
+    selectedEntries.push(candidate);
   };
 
-  return flatRoutes
-    .slice(0, 3)
-    .map((item, index) => {
-      const routeId = idOrder[index] || `R${index + 1}`;
-      const profileTitle =
-        item.profile === "walking" ? "Walking" : item.profile === "cycling" ? "Cycling" : "Driving";
-      const biases = biasByProfile[item.profile] || { score: 0, speed: 0 };
-      return buildOsrmRouteOption({
-        routeData: item.routeData,
-        profile: item.profile,
-        id: routeId,
-        title: `Route ${routeId} (${profileTitle})`,
-        preferences,
-        scoreBias: biases.score,
-        speedBiasMinutes: biases.speed,
-      });
-    })
-    .filter(Boolean);
+  // Always include a driving option.
+  trySelect("driving", 0);
+  // Include walking for realistic short-distance comparison.
+  if (straightDistance <= 6000) {
+    trySelect("walking", 0);
+  }
+  // Include cycling alternative when traffic avoidance is requested.
+  if (preferences.avoidTraffic) {
+    trySelect("cycling", 0);
+  }
+  // Fill remaining slots with next-fastest unique options.
+  const allCandidatesBySpeed = routeBatches
+    .flat()
+    .sort(
+      (left, right) => (Number(left.routeData.duration) || Infinity) - (Number(right.routeData.duration) || Infinity)
+    );
+  allCandidatesBySpeed.forEach((candidate) => {
+    if (selectedEntries.length >= 3) return;
+    const key = `${candidate.profile}:${candidate.index}`;
+    if (usedEntries.has(key)) return;
+    usedEntries.add(key);
+    selectedEntries.push(candidate);
+  });
+
+  const idOrder = ["A", "B", "C"];
+  return selectedEntries.slice(0, 3).map((item, index) => {
+    const routeId = idOrder[index] || `R${index + 1}`;
+    const profileTitle =
+      item.profile === "walking" ? "Walking" : item.profile === "cycling" ? "Cycling" : "Driving";
+    return buildOsrmRouteOption({
+      routeData: item.routeData,
+      profile: item.profile,
+      id: routeId,
+      title: `Route ${routeId} (${profileTitle})`,
+      preferences,
+    });
+  }).filter(Boolean);
 }
 
 function computeRouteSafetyMetrics(path, preferences) {
@@ -1424,11 +1544,11 @@ function syncLegacyRouteSelection() {
   });
 }
 
-function setGpsWaypoint(latlng, pointType) {
+function setGpsWaypoint(latlng, pointType, options = {}) {
   if (!latlng || !state.gps.map) return;
   if (pointType === "from") {
     state.gps.fromLatLng = latlng;
-    routeOriginInput.value = formatGpsLatLng(latlng);
+    setGpsInputStreetName(latlng, "from", options);
     if (!state.gps.fromMarker) {
       state.gps.fromMarker = L.marker(latlng, {
         icon: L.divIcon({
@@ -1447,7 +1567,7 @@ function setGpsWaypoint(latlng, pointType) {
   }
 
   state.gps.toLatLng = latlng;
-  routeDestinationInput.value = formatGpsLatLng(latlng);
+  setGpsInputStreetName(latlng, "to", options);
   if (!state.gps.toMarker) {
     state.gps.toMarker = L.marker(latlng, {
       icon: L.divIcon({
@@ -1527,8 +1647,8 @@ function generateGpsRoutes(options = {}) {
     });
   state.gps.fromLatLng = fromPoint;
   state.gps.toLatLng = toPoint;
-  setGpsWaypoint(fromPoint, "from");
-  setGpsWaypoint(toPoint, "to");
+  setGpsWaypoint(fromPoint, "from", { preserveExistingName: true });
+  setGpsWaypoint(toPoint, "to", { preserveExistingName: true });
 
   const preferences = getGpsPreferenceWeights();
   const directSpanDegrees = Math.hypot(fromPoint.lat - toPoint.lat, fromPoint.lng - toPoint.lng);
@@ -1874,8 +1994,8 @@ function bindGpsUiEvents() {
         state.gps.toLatLng = resolveGpsPoint(route.destination_location, "community-destination");
       }
       if (state.gps.map) {
-        setGpsWaypoint(state.gps.fromLatLng, "from");
-        setGpsWaypoint(state.gps.toLatLng, "to");
+        setGpsWaypoint(state.gps.fromLatLng, "from", { preserveExistingName: true });
+        setGpsWaypoint(state.gps.toLatLng, "to", { preserveExistingName: true });
       }
       generateGpsRoutes({ silent: true });
       showToast("Community route applied.");
@@ -2686,8 +2806,8 @@ if (!routeFormAlreadyBound) {
     preferNearby: !destinationParsed,
   });
   if (state.gps.map) {
-    setGpsWaypoint(state.gps.fromLatLng, "from");
-    setGpsWaypoint(state.gps.toLatLng, "to");
+    setGpsWaypoint(state.gps.fromLatLng, "from", { preserveExistingName: true });
+    setGpsWaypoint(state.gps.toLatLng, "to", { preserveExistingName: true });
   }
 
   generateGpsRoutes({ silent: true });
