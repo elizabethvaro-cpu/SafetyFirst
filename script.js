@@ -51,6 +51,9 @@ const mapFilterBtn = document.getElementById("map-filter-btn");
 const mapAlertsBtn = document.getElementById("map-alerts-btn");
 const gpsMapContainer = document.getElementById("gps-live-map");
 const gpsMapHint = document.getElementById("gps-map-hint");
+const gpsTurnPanel = document.getElementById("gps-turn-panel");
+const gpsTurnPrimary = document.getElementById("gps-turn-primary");
+const gpsTurnSecondary = document.getElementById("gps-turn-secondary");
 const communityRouteForm = document.getElementById("community-route-form");
 const communityRouteList = document.getElementById("community-route-list");
 const routeOptionsContainer = document.getElementById("route-options");
@@ -78,6 +81,7 @@ const GPS_DANGER_MARKER_LIMIT = 150;
 const GPS_NEARBY_FALLBACK_MIN_METERS = 320;
 const GPS_NEARBY_FALLBACK_MAX_METERS = 2300;
 const GPS_MAX_VISIBLE_DIRECTIONS = 8;
+const GPS_ROUTE_ARRIVAL_THRESHOLD_METERS = 24;
 const GPS_OSRM_BASE_URL = "https://router.project-osrm.org";
 const GPS_OSRM_TIMEOUT_MS = 4500;
 const GPS_REVERSE_GEOCODE_URL = "https://nominatim.openstreetmap.org/reverse";
@@ -209,6 +213,7 @@ const state = {
     routeRatings: {},
     activeRouteId: null,
     navigationRouteId: null,
+    navigationStepIndex: 0,
     currentRouteRiskLevel: null,
     navigationMarker: null,
     lastNavigationLatLng: null,
@@ -1209,7 +1214,7 @@ function updateGpsHint(message) {
     gpsMapHint.textContent = "GPS active. Stay on the highlighted route.";
     return;
   }
-  gpsMapHint.textContent = "Tap a route card, then press Start GPS to begin navigation.";
+  gpsMapHint.textContent = "Tap a route card or route line to start GPS navigation.";
 }
 
 function interpolateRoute(start, control, end, samples = GPS_ROUTE_SAMPLE_POINTS) {
@@ -1752,6 +1757,7 @@ function setGpsRouteSelection(routeId) {
   state.gps.activeRouteId = selected.id;
   if (state.gps.navigationRouteId && state.gps.navigationRouteId !== selected.id) {
     state.gps.navigationRouteId = null;
+    state.gps.navigationStepIndex = 0;
   }
   state.gps.currentRouteRiskLevel = selected.riskLevel;
   state.selectedRouteKey = selected.routeKey;
@@ -1759,6 +1765,9 @@ function setGpsRouteSelection(routeId) {
   syncLegacyRouteSelection();
   drawGpsRoutesOnMap();
   focusGpsRouteOnMap(selected);
+  if (state.gps.navigationRouteId !== selected.id) {
+    renderGpsTurnByTurn(null);
+  }
   updateGpsHint();
 }
 
@@ -1766,6 +1775,9 @@ function activateGpsNavigation(routeId) {
   if (!routeId) return;
   setGpsRouteSelection(routeId);
   state.gps.navigationRouteId = routeId;
+  state.gps.navigationStepIndex = 0;
+  const activeRoute = getActiveGpsRoute();
+  renderGpsTurnByTurn(activeRoute, 0);
   drawGpsRoutesOnMap();
   updateGpsHint("GPS active. Follow the highlighted route and moving guide dot.");
 }
@@ -1788,6 +1800,8 @@ function removeGpsNavigationGuide() {
   }
   state.gps.navigationMarker = null;
   state.gps.lastNavigationLatLng = null;
+  state.gps.navigationStepIndex = 0;
+  renderGpsTurnByTurn(null);
 }
 
 function getActiveGpsRoute() {
@@ -1796,27 +1810,86 @@ function getActiveGpsRoute() {
   return state.gps.routeChoices.find((route) => route.id === routeId) || null;
 }
 
-function getClosestPointOnRoute(latlng, routePath) {
-  if (!latlng || !Array.isArray(routePath) || !routePath.length) return latlng;
+function getClosestRoutePointInfo(latlng, routePath) {
+  if (!latlng || !Array.isArray(routePath) || !routePath.length) {
+    return {
+      point: latlng,
+      index: 0,
+      distance: Number.POSITIVE_INFINITY,
+    };
+  }
   let closestPoint = routePath[0];
+  let closestIndex = 0;
   let closestDistance = Number.POSITIVE_INFINITY;
-  routePath.forEach((point) => {
+  routePath.forEach((point, index) => {
     const pointDistance = distanceMeters(latlng.lat, latlng.lng, point.lat, point.lng);
     if (pointDistance < closestDistance) {
       closestDistance = pointDistance;
       closestPoint = point;
+      closestIndex = index;
     }
   });
-  return closestPoint;
+  return {
+    point: closestPoint,
+    index: closestIndex,
+    distance: closestDistance,
+  };
+}
+
+function deriveNavigationStepIndex(route, latlng) {
+  if (!route?.directions?.length || !route?.path?.length || !latlng) return 0;
+  const closestPoint = getClosestRoutePointInfo(latlng, route.path);
+  const directions = route.directions;
+  if (
+    closestPoint.index >= Math.max(0, route.path.length - 2) &&
+    closestPoint.distance <= GPS_ROUTE_ARRIVAL_THRESHOLD_METERS
+  ) {
+    return Math.max(0, directions.length - 1);
+  }
+  const routeProgress =
+    route.path.length > 1 ? closestPoint.index / Math.max(1, route.path.length - 1) : 0;
+  const totalDuration = getDirectionsDurationMinutes(directions);
+  const progressedMinutes = routeProgress * totalDuration;
+  let cumulativeMinutes = 0;
+  for (let index = 0; index < directions.length; index += 1) {
+    cumulativeMinutes += Math.max(1, Number(directions[index].durationMinutes) || 0);
+    if (progressedMinutes <= cumulativeMinutes) return index;
+  }
+  return Math.max(0, directions.length - 1);
+}
+
+function renderGpsTurnByTurn(route, stepIndex = 0) {
+  if (!gpsTurnPanel || !gpsTurnPrimary || !gpsTurnSecondary) return;
+  if (!route?.directions?.length || !state.gps.navigationRouteId) {
+    gpsTurnPanel.classList.add("hidden");
+    gpsTurnPrimary.textContent = "Select a route and start GPS.";
+    gpsTurnSecondary.textContent = "Turn-by-turn directions will appear here.";
+    return;
+  }
+  const directions = normalizeRouteDirectionsToEta(route.directions, route.etaMinutes);
+  const safeStepIndex = Math.max(0, Math.min(stepIndex, directions.length - 1));
+  const currentStep = directions[safeStepIndex];
+  const nextStep = directions[safeStepIndex + 1] || null;
+  const remainingMinutes = getDirectionsDurationMinutes(directions.slice(safeStepIndex));
+  const currentLabel = currentStep?.instruction || "Continue on the highlighted route.";
+  const nextLabel = nextStep?.instruction || "Arrive at your destination.";
+  gpsTurnPrimary.textContent = `Now: ${currentLabel}`;
+  gpsTurnSecondary.textContent = `${formatDurationMinutes(remainingMinutes)} remaining • Next: ${nextLabel}`;
+  gpsTurnPanel.classList.remove("hidden");
 }
 
 function updateGpsNavigationMarker(latlng, options = {}) {
   if (!state.gps.map || !latlng) return;
   const activeRoute = getActiveGpsRoute();
-  const markerLatLng =
+  const closestPointInfo =
     options.snapToRoute && activeRoute?.path?.length
-      ? getClosestPointOnRoute(latlng, activeRoute.path)
-      : latlng;
+      ? getClosestRoutePointInfo(latlng, activeRoute.path)
+      : {
+          point: latlng,
+          index: 0,
+          distance: Number.POSITIVE_INFINITY,
+        };
+  const markerLatLng = closestPointInfo.point;
 
   if (
     !options.force &&
@@ -1846,12 +1919,16 @@ function updateGpsNavigationMarker(latlng, options = {}) {
   }
   state.gps.lastNavigationLatLng = markerLatLng;
 
-  const nextInstruction = activeRoute?.directions?.[0]?.instruction || "Select a route and tap Start GPS.";
+  const stepIndex = deriveNavigationStepIndex(activeRoute, markerLatLng);
+  state.gps.navigationStepIndex = stepIndex;
+  const nextInstruction =
+    activeRoute?.directions?.[stepIndex]?.instruction || "Select a route and tap Start GPS.";
   state.gps.navigationMarker.bindTooltip(`GPS: ${nextInstruction}`, {
     permanent: false,
     direction: "top",
     offset: [0, -10],
   });
+  renderGpsTurnByTurn(activeRoute, stepIndex);
 }
 
 function renderGpsNavigationGuide(route) {
@@ -1915,6 +1992,7 @@ function renderGpsRouteOptions() {
       const visibleDirections = getVisibleRouteDirections(route);
       const displayEtaMinutes = getDirectionsDurationMinutes(visibleDirections) || route.etaMinutes;
       const selectLabel = isNavigating ? "Using GPS" : route.id === state.gps.activeRouteId ? "Start GPS" : "Select";
+      const activeDirectionIndex = isNavigating ? state.gps.navigationStepIndex : -1;
       return `
         <article class="route-option ${activeClass} ${riskClass} ${recommendedClass}" data-route-id="${route.id}" data-route-key="${route.routeKey}">
           <button type="button" class="tiny-btn ${isNavigating ? "is-active" : ""}" data-action="select-gps-route" data-route-id="${route.id}" data-route-key="${route.routeKey}">
@@ -1926,8 +2004,8 @@ function renderGpsRouteOptions() {
           <ol class="route-directions" aria-label="Route directions">
             ${visibleDirections
               .map(
-                (step) =>
-                  `<li><span class="step-mode">${escapeHtml(step.label)}:</span> ${escapeHtml(
+                (step, index) =>
+                  `<li class="${index === activeDirectionIndex ? "is-current" : ""}"><span class="step-mode">${escapeHtml(step.label)}:</span> ${escapeHtml(
                     step.instruction
                   )} <span class="step-duration">(${escapeHtml(
                     formatDurationMinutes(step.durationMinutes)
@@ -1970,6 +2048,8 @@ function setGpsWaypoint(latlng, pointType, options = {}) {
   if (!latlng || !state.gps.map) return;
   if (!options.preserveNavigation) {
     state.gps.navigationRouteId = null;
+    state.gps.navigationStepIndex = 0;
+    renderGpsTurnByTurn(null);
   }
   if (pointType === "from") {
     state.gps.fromLatLng = latlng;
@@ -2363,7 +2443,7 @@ function bindGpsUiEvents() {
       const routeCard = target.closest(".route-option");
       if (routeCard instanceof HTMLElement) {
         const routeId = routeCard.dataset.routeId;
-        if (routeId) setGpsRouteSelection(routeId);
+        if (routeId) activateGpsNavigation(routeId);
       }
     });
   }

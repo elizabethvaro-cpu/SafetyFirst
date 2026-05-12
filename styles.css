@@ -756,6 +756,33 @@ fieldset {
   z-index: 450;
 }
 
+.gps-turn-panel {
+  position: absolute;
+  top: 0.8rem;
+  left: 0.8rem;
+  right: 0.8rem;
+  border: 1px solid var(--line);
+  border-radius: 0.65rem;
+  background: rgba(255, 255, 255, 0.95);
+  padding: 0.42rem 0.55rem;
+  z-index: 460;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.16);
+}
+
+.gps-turn-panel p {
+  margin: 0;
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.gps-turn-panel small {
+  display: block;
+  margin-top: 0.2rem;
+  font-size: 0.68rem;
+  color: var(--muted);
+}
+
 .gps-danger-pin-wrap {
   background: transparent;
   border: 0;
@@ -956,6 +983,7 @@ fieldset {
   background: #fff;
   padding: 0.55rem 0.65rem;
   color: var(--text);
+  cursor: pointer;
 }
 
 .route-option.low-risk {
@@ -1002,6 +1030,11 @@ fieldset {
 .route-directions li span:last-child {
   color: var(--muted);
   white-space: nowrap;
+}
+
+.route-directions li.is-current {
+  font-weight: 600;
+  color: var(--primary-dark);
 }
 
 .profile-card {
@@ -1139,6 +1172,10 @@ body.dark .route-badge {
 
 body.dark .gps-map-hint {
   background: rgba(15, 24, 41, 0.92);
+}
+
+body.dark .gps-turn-panel {
+  background: rgba(15, 24, 41, 0.95);
 }
 
 @media (max-width: 359px) {
