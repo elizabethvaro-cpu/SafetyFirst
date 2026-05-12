@@ -5,6 +5,36 @@
   --text: #0f172a;
   --muted: #6b7280;
   --primary: #2b59ff;
+  --primary-strong: #244bd2;
+  --primary-soft: #e0e7ff;
+  --primary-border: #9eb0ff;
+  --bg-accent-start: #e9efff;
+  --map-grid-light: #ecf2ff;
+  --map-grid-lighter: #f8fbff;
+  --map-border: #d9e2f5;
+  --accent-glow: rgba(43, 89, 255, 0.16);
+  --accent-glow-soft: rgba(43, 89, 255, 0.08);
+  --chip-active-bg: #eef2ff;
+  --chip-active-border: #bfccff;
+  --button-grad-start: #3567ff;
+  --button-grad-end: #244bd2;
+  --route-bg: #f7faff;
+  --route-accent-line: #5577ff;
+  --gps-nav-dot: #2563eb;
+  --rating-fill-bg: #e0e7ff;
+  --rating-fill-border: #9eb0ff;
+  --rating-fill-text: #1d4ed8;
+  --rating-selected-bg: #2563eb;
+  --rating-selected-border: #1d4ed8;
+  --rating-fill-bg-dark: rgba(59, 130, 246, 0.2);
+  --rating-fill-border-dark: #3b82f6;
+  --rating-fill-text-dark: #bfdbfe;
+  --rating-selected-bg-dark: #3b82f6;
+  --rating-selected-border-dark: #60a5fa;
+  --route-active-border: #9eb0ff;
+  --route-active-bg: #f4f7ff;
+  --nav-icon-bg: #eef2ff;
+  --recommended-ring: rgba(37, 99, 235, 0.22);
   --danger: #d62839;
   --danger-soft: #ffe8ec;
   --warning: #ff9f1c;
@@ -21,7 +51,7 @@
 body {
   margin: 0;
   font-family: Inter, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  background: radial-gradient(circle at 50% -15%, #e9efff 0%, var(--bg) 48%);
+  background: radial-gradient(circle at 50% -15%, var(--bg-accent-start) 0%, var(--bg) 48%);
   color: var(--text);
 }
 
@@ -340,15 +370,15 @@ h3 {
   border-radius: 1rem;
   background:
     linear-gradient(25deg, rgba(24, 169, 87, 0.18), rgba(24, 169, 87, 0)),
-    linear-gradient(115deg, rgba(43, 89, 255, 0.16), rgba(43, 89, 255, 0)),
+    linear-gradient(115deg, var(--accent-glow), var(--accent-glow-soft)),
     repeating-linear-gradient(
       45deg,
-      #ecf2ff,
-      #ecf2ff 18px,
-      #f8fbff 18px,
-      #f8fbff 36px
+      var(--map-grid-light),
+      var(--map-grid-light) 18px,
+      var(--map-grid-lighter) 18px,
+      var(--map-grid-lighter) 36px
     );
-  border: 1px solid #d9e2f5;
+  border: 1px solid var(--map-border);
   box-shadow: var(--shadow);
   position: relative;
   overflow: hidden;
@@ -543,9 +573,9 @@ h3 {
 }
 
 .chip.active {
-  background: #eef2ff;
+  background: var(--chip-active-bg);
   color: var(--primary);
-  border-color: #bfccff;
+  border-color: var(--chip-active-border);
 }
 
 .form-card {
@@ -603,7 +633,7 @@ fieldset {
 }
 
 .primary-btn {
-  background: linear-gradient(135deg, #3567ff, #244bd2);
+  background: linear-gradient(135deg, var(--button-grad-start), var(--button-grad-end));
   color: #fff;
 }
 
@@ -695,7 +725,7 @@ fieldset {
   background:
     radial-gradient(circle at 15% 20%, rgba(24, 169, 87, 0.23), transparent 33%),
     radial-gradient(circle at 82% 74%, rgba(43, 89, 255, 0.18), transparent 38%),
-    #f7faff;
+    var(--route-bg);
   border: 1px solid var(--line);
 }
 
@@ -766,7 +796,7 @@ fieldset {
   border-radius: 999px;
   display: block;
   border: 2px solid #fff;
-  background: #2563eb;
+  background: var(--gps-nav-dot);
   box-shadow: 0 6px 14px rgba(15, 23, 42, 0.35);
 }
 
@@ -843,14 +873,14 @@ fieldset {
 }
 
 .gps-rate-btn.is-filled {
-  background: #e0e7ff;
-  border-color: #9eb0ff;
-  color: #1d4ed8;
+  background: var(--rating-fill-bg);
+  border-color: var(--rating-fill-border);
+  color: var(--rating-fill-text);
 }
 
 .gps-rate-btn.is-selected {
-  background: #2563eb;
-  border-color: #1d4ed8;
+  background: var(--rating-selected-bg);
+  border-color: var(--rating-selected-border);
   color: #fff;
 }
 
@@ -881,7 +911,7 @@ fieldset {
   left: 18%;
   top: 64%;
   width: 62%;
-  border-top: 4px dashed #5577ff;
+  border-top: 4px dashed var(--route-accent-line);
   transform: rotate(-27deg);
 }
 
@@ -936,12 +966,12 @@ fieldset {
 }
 
 .route-option.recommended {
-  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.22);
+  box-shadow: 0 0 0 2px var(--recommended-ring);
 }
 
 .route-option.active {
-  border-color: #9eb0ff;
-  background: #f4f7ff;
+  border-color: var(--route-active-border);
+  background: var(--route-active-bg);
 }
 
 .route-directions {
@@ -1031,7 +1061,7 @@ fieldset {
   place-items: center;
   font-size: 0.58rem;
   font-weight: 800;
-  background: #eef2ff;
+  background: var(--nav-icon-bg);
   color: #475569;
 }
 
@@ -1077,14 +1107,14 @@ body.dark .map-overlay.bottom {
 }
 
 body.dark .gps-rate-btn.is-filled {
-  background: rgba(59, 130, 246, 0.2);
-  border-color: #3b82f6;
-  color: #bfdbfe;
+  background: var(--rating-fill-bg-dark);
+  border-color: var(--rating-fill-border-dark);
+  color: var(--rating-fill-text-dark);
 }
 
 body.dark .gps-rate-btn.is-selected {
-  background: #3b82f6;
-  border-color: #60a5fa;
+  background: var(--rating-selected-bg-dark);
+  border-color: var(--rating-selected-border-dark);
   color: #fff;
 }
 

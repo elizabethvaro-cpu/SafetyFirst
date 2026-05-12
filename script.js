@@ -84,13 +84,76 @@ const GPS_REVERSE_GEOCODE_URL = "https://nominatim.openstreetmap.org/reverse";
 const GPS_REVERSE_GEOCODE_TIMEOUT_MS = 3500;
 const ACCENT_COLOR_STORAGE_KEY = "safesteps_accent_color";
 const ACCENT_PALETTES = {
-  blue: "#2b59ff",
-  red: "#dc2626",
-  orange: "#f97316",
-  yellow: "#ca8a04",
-  green: "#16a34a",
-  purple: "#7c3aed",
-  pink: "#db2777",
+  blue: {
+    primary: "#2b59ff",
+    strong: "#244bd2",
+    soft: "#e0e7ff",
+    border: "#9eb0ff",
+    bgStart: "#e9efff",
+    bgBase: "#f5f7fb",
+    surfaceAlt: "#eef3ff",
+    line: "#d6def3",
+  },
+  red: {
+    primary: "#dc2626",
+    strong: "#b91c1c",
+    soft: "#fee2e2",
+    border: "#fca5a5",
+    bgStart: "#fff1f2",
+    bgBase: "#fff7f7",
+    surfaceAlt: "#fff1f2",
+    line: "#f7cfd1",
+  },
+  orange: {
+    primary: "#f97316",
+    strong: "#ea580c",
+    soft: "#ffedd5",
+    border: "#fdba74",
+    bgStart: "#fff7ed",
+    bgBase: "#fffaf4",
+    surfaceAlt: "#fff2df",
+    line: "#f8deba",
+  },
+  yellow: {
+    primary: "#ca8a04",
+    strong: "#a16207",
+    soft: "#fef3c7",
+    border: "#fcd34d",
+    bgStart: "#fffbeb",
+    bgBase: "#fffdf5",
+    surfaceAlt: "#fff7d6",
+    line: "#f3e5b3",
+  },
+  green: {
+    primary: "#16a34a",
+    strong: "#15803d",
+    soft: "#dcfce7",
+    border: "#86efac",
+    bgStart: "#ecfdf5",
+    bgBase: "#f4fdf8",
+    surfaceAlt: "#e7fbed",
+    line: "#bfe7cd",
+  },
+  purple: {
+    primary: "#7c3aed",
+    strong: "#6d28d9",
+    soft: "#ede9fe",
+    border: "#c4b5fd",
+    bgStart: "#f5f3ff",
+    bgBase: "#f8f7ff",
+    surfaceAlt: "#f0edff",
+    line: "#ddd6fe",
+  },
+  pink: {
+    primary: "#db2777",
+    strong: "#be185d",
+    soft: "#fce7f3",
+    border: "#f9a8d4",
+    bgStart: "#fdf2f8",
+    bgBase: "#fff6fb",
+    surfaceAlt: "#feeaf4",
+    line: "#f7c9df",
+  },
 };
 
 const labels = {
@@ -486,10 +549,65 @@ function readStoredAccentColor() {
   }
 }
 
+function hexToRgb(hexColor) {
+  const normalized = String(hexColor || "")
+    .replace("#", "")
+    .trim();
+  if (normalized.length !== 6) {
+    return { r: 43, g: 89, b: 255 };
+  }
+  const intValue = Number.parseInt(normalized, 16);
+  if (!Number.isFinite(intValue)) {
+    return { r: 43, g: 89, b: 255 };
+  }
+  return {
+    r: (intValue >> 16) & 255,
+    g: (intValue >> 8) & 255,
+    b: intValue & 255,
+  };
+}
+
 function applyAccentColor(colorKey, options = {}) {
   const normalized = getAccentColorKey(colorKey);
-  const colorValue = ACCENT_PALETTES[normalized];
-  document.documentElement.style.setProperty("--primary", colorValue);
+  const palette = ACCENT_PALETTES[normalized];
+  const primaryRgb = hexToRgb(palette.primary);
+  const strongRgb = hexToRgb(palette.strong);
+  const softRgb = hexToRgb(palette.soft);
+  const rootStyle = document.documentElement.style;
+  rootStyle.setProperty("--primary", palette.primary);
+  rootStyle.setProperty("--primary-strong", palette.strong);
+  rootStyle.setProperty("--primary-soft", palette.soft);
+  rootStyle.setProperty("--primary-border", palette.border);
+  rootStyle.setProperty("--bg-accent-start", palette.bgStart);
+  rootStyle.setProperty("--bg", palette.bgBase);
+  rootStyle.setProperty("--surface-alt", palette.surfaceAlt);
+  rootStyle.setProperty("--line", palette.line);
+  rootStyle.setProperty("--chip-active-bg", palette.soft);
+  rootStyle.setProperty("--chip-active-border", palette.border);
+  rootStyle.setProperty("--button-grad-start", palette.primary);
+  rootStyle.setProperty("--button-grad-end", palette.strong);
+  rootStyle.setProperty("--route-bg", palette.surfaceAlt);
+  rootStyle.setProperty("--route-accent-line", palette.primary);
+  rootStyle.setProperty("--gps-nav-dot", palette.primary);
+  rootStyle.setProperty("--rating-fill-bg", palette.soft);
+  rootStyle.setProperty("--rating-fill-border", palette.border);
+  rootStyle.setProperty("--rating-fill-text", palette.strong);
+  rootStyle.setProperty("--rating-selected-bg", palette.primary);
+  rootStyle.setProperty("--rating-selected-border", palette.strong);
+  rootStyle.setProperty("--rating-fill-bg-dark", `rgba(${softRgb.r}, ${softRgb.g}, ${softRgb.b}, 0.28)`);
+  rootStyle.setProperty("--rating-fill-border-dark", `rgba(${primaryRgb.r}, ${primaryRgb.g}, ${primaryRgb.b}, 0.9)`);
+  rootStyle.setProperty("--rating-fill-text-dark", `rgb(${softRgb.r}, ${softRgb.g}, ${softRgb.b})`);
+  rootStyle.setProperty("--rating-selected-bg-dark", `rgb(${primaryRgb.r}, ${primaryRgb.g}, ${primaryRgb.b})`);
+  rootStyle.setProperty("--rating-selected-border-dark", `rgb(${strongRgb.r}, ${strongRgb.g}, ${strongRgb.b})`);
+  rootStyle.setProperty("--route-active-border", palette.border);
+  rootStyle.setProperty("--route-active-bg", palette.soft);
+  rootStyle.setProperty("--nav-icon-bg", palette.soft);
+  rootStyle.setProperty("--recommended-ring", `rgba(${primaryRgb.r}, ${primaryRgb.g}, ${primaryRgb.b}, 0.22)`);
+  rootStyle.setProperty("--accent-glow", `rgba(${primaryRgb.r}, ${primaryRgb.g}, ${primaryRgb.b}, 0.2)`);
+  rootStyle.setProperty("--accent-glow-soft", `rgba(${primaryRgb.r}, ${primaryRgb.g}, ${primaryRgb.b}, 0)`);
+  rootStyle.setProperty("--map-grid-light", `rgba(${primaryRgb.r}, ${primaryRgb.g}, ${primaryRgb.b}, 0.13)`);
+  rootStyle.setProperty("--map-grid-lighter", `rgba(${primaryRgb.r}, ${primaryRgb.g}, ${primaryRgb.b}, 0.05)`);
+  rootStyle.setProperty("--map-border", `rgba(${primaryRgb.r}, ${primaryRgb.g}, ${primaryRgb.b}, 0.26)`);
   if (accentColorSelect) {
     accentColorSelect.value = normalized;
   }
