@@ -208,6 +208,7 @@ const state = {
     routeChoices: [],
     routeRatings: {},
     activeRouteId: null,
+    navigationRouteId: null,
     currentRouteRiskLevel: null,
     navigationMarker: null,
     lastNavigationLatLng: null,
@@ -1204,7 +1205,11 @@ function updateGpsHint(message) {
     gpsMapHint.textContent = "Tap map to set To point.";
     return;
   }
-  gpsMapHint.textContent = "Tap markers or route cards to inspect safety.";
+  if (state.gps.navigationRouteId) {
+    gpsMapHint.textContent = "GPS active. Stay on the highlighted route.";
+    return;
+  }
+  gpsMapHint.textContent = "Tap a route card, then press Start GPS to begin navigation.";
 }
 
 function interpolateRoute(start, control, end, samples = GPS_ROUTE_SAMPLE_POINTS) {
@@ -1331,6 +1336,54 @@ function buildRouteDirections(routeId, etaMinutes, preferences) {
   ];
 }
 
+function getDirectionsDurationMinutes(directions) {
+  if (!Array.isArray(directions) || !directions.length) return 0;
+  return directions.reduce((sum, step) => sum + Math.max(1, Number(step.durationMinutes) || 0), 0);
+}
+
+function normalizeRouteDirectionsToEta(directions, etaMinutes) {
+  if (!Array.isArray(directions) || !directions.length) return [];
+  const normalized = directions.map((step) => ({
+    ...step,
+    durationMinutes: Math.max(1, Math.round(Number(step.durationMinutes) || 0)),
+  }));
+  let totalMinutes = getDirectionsDurationMinutes(normalized);
+  let delta = Math.round(Number(etaMinutes) || 0) - totalMinutes;
+  if (delta > 0) {
+    normalized[normalized.length - 1].durationMinutes += delta;
+    return normalized;
+  }
+  while (delta < 0) {
+    let adjusted = false;
+    for (let index = normalized.length - 1; index >= 0 && delta < 0; index -= 1) {
+      const current = normalized[index].durationMinutes;
+      if (current <= 1) continue;
+      normalized[index].durationMinutes -= 1;
+      delta += 1;
+      adjusted = true;
+    }
+    if (!adjusted) break;
+  }
+  return normalized;
+}
+
+function getVisibleRouteDirections(route) {
+  const normalized = normalizeRouteDirectionsToEta(route?.directions || [], route?.etaMinutes || 0);
+  if (normalized.length <= GPS_MAX_VISIBLE_DIRECTIONS) return normalized;
+  const leadingSteps = normalized.slice(0, GPS_MAX_VISIBLE_DIRECTIONS - 1);
+  const usedMinutes = getDirectionsDurationMinutes(leadingSteps);
+  const remainingMinutes = Math.max(1, Math.round(route.etaMinutes) - usedMinutes);
+  return [
+    ...leadingSteps,
+    {
+      mode: "continue",
+      label: "Continue",
+      durationMinutes: remainingMinutes,
+      instruction: "Continue following this route to your destination.",
+    },
+  ];
+}
+
 function decodePolyline6(encoded) {
   const coordinates = [];
   let index = 0;
@@ -1394,7 +1447,7 @@ function extractOsrmDirections(routeData, profile) {
     profile === "walking" ? "Walk" : profile === "cycling" ? "Bike" : "Drive";
   const allSteps = (routeData?.legs || []).flatMap((leg) => leg.steps || []);
   if (!allSteps.length) return [];
-  return allSteps.slice(0, GPS_MAX_VISIBLE_DIRECTIONS).map((step) => ({
+  return allSteps.map((step) => ({
     mode: profile,
     label: profileLabel,
     durationMinutes: Math.max(1, Math.round((Number(step.duration) || 0) / 60)),
@@ -1446,8 +1499,11 @@ function buildOsrmRouteOption({
   const etaMinutes = Math.max(4, boundedModeMinutes + speedBiasMinutes);
   const adjustedScore = Math.max(0, Math.min(100, metrics.score + scoreBias));
   const riskLevel = adjustedScore >= 72 ? "low" : adjustedScore >= 48 ? "medium" : "high";
-  const directions =
-    extractOsrmDirections(routeData, profile) || buildRouteDirections(id, etaMinutes, preferences);
+  const rawDirections = extractOsrmDirections(routeData, profile) || buildRouteDirections(id, etaMinutes, preferences);
+  const directions = normalizeRouteDirectionsToEta(
+    rawDirections.length ? rawDirections : buildRouteDirections(id, etaMinutes, preferences),
+    etaMinutes
+  );
   return {
     id,
     routeKey: id,
@@ -1456,7 +1512,7 @@ function buildOsrmRouteOption({
     score: adjustedScore,
     riskLevel,
     etaMinutes,
-    directions: directions.length ? directions : buildRouteDirections(id, etaMinutes, preferences),
+    directions,
     nearbyIncidents: metrics.nearbyIncidents,
   };
 }
@@ -1555,11 +1611,16 @@ async function tryBuildRealGpsRoutes(fromPoint, toPoint, preferences) {
     if (route.transportProfile === "cycling") {
       route.etaMinutes = Math.max(3, Math.min(route.etaMinutes, directCycleMinutes + 3));
     }
+    route.directions = normalizeRouteDirectionsToEta(route.directions, route.etaMinutes);
   });
   if (drivingOption && straightDistance > 700) {
     const walkingOption = builtRoutes.find((route) => route.transportProfile === "walking");
     if (walkingOption && walkingOption.etaMinutes <= drivingOption.etaMinutes) {
       walkingOption.etaMinutes = drivingOption.etaMinutes + 2;
+      walkingOption.directions = normalizeRouteDirectionsToEta(
+        walkingOption.directions,
+        walkingOption.etaMinutes
+      );
     }
   }
   const routePair = builtRoutes.slice(0, 3);
@@ -1568,6 +1629,10 @@ async function tryBuildRealGpsRoutes(fromPoint, toPoint, preferences) {
       if (routePair[i].transportProfile === routePair[j].transportProfile) continue;
       if (routePair[i].etaMinutes === routePair[j].etaMinutes) {
         routePair[j].etaMinutes += 1;
+        routePair[j].directions = normalizeRouteDirectionsToEta(
+          routePair[j].directions,
+          routePair[j].etaMinutes
+        );
       }
     }
   }
@@ -1634,7 +1699,7 @@ function buildRouteOption({ id, title, path, speedBiasMinutes = 0, safetyBias = 
   const etaMinutes = Math.max(5, baseMinutes + speedBiasMinutes);
   const adjustedScore = Math.max(0, Math.min(100, metrics.score + safetyBias));
   const riskLevel = adjustedScore >= 72 ? "low" : adjustedScore >= 48 ? "medium" : "high";
-  const directions = buildRouteDirections(id, etaMinutes, preferences);
+  const directions = normalizeRouteDirectionsToEta(buildRouteDirections(id, etaMinutes, preferences), etaMinutes);
 
   return {
     id,
@@ -1685,12 +1750,24 @@ function setGpsRouteSelection(routeId) {
     null;
   if (!selected) return;
   state.gps.activeRouteId = selected.id;
+  if (state.gps.navigationRouteId && state.gps.navigationRouteId !== selected.id) {
+    state.gps.navigationRouteId = null;
+  }
   state.gps.currentRouteRiskLevel = selected.riskLevel;
   state.selectedRouteKey = selected.routeKey;
   renderGpsRouteOptions();
   syncLegacyRouteSelection();
   drawGpsRoutesOnMap();
   focusGpsRouteOnMap(selected);
+  updateGpsHint();
+}
+
+function activateGpsNavigation(routeId) {
+  if (!routeId) return;
+  setGpsRouteSelection(routeId);
+  state.gps.navigationRouteId = routeId;
+  drawGpsRoutesOnMap();
+  updateGpsHint("GPS active. Follow the highlighted route and moving guide dot.");
 }
 
 function focusGpsRouteOnMap(route) {
@@ -1714,7 +1791,9 @@ function removeGpsNavigationGuide() {
 }
 
 function getActiveGpsRoute() {
-  return state.gps.routeChoices.find((route) => route.id === state.gps.activeRouteId) || null;
+  const routeId = state.gps.navigationRouteId;
+  if (!routeId) return null;
+  return state.gps.routeChoices.find((route) => route.id === routeId) || null;
 }
 
 function getClosestPointOnRoute(latlng, routePath) {
@@ -1767,7 +1846,7 @@ function updateGpsNavigationMarker(latlng, options = {}) {
   }
   state.gps.lastNavigationLatLng = markerLatLng;
 
-  const nextInstruction = activeRoute?.directions?.[0]?.instruction || "Follow the highlighted route.";
+  const nextInstruction = activeRoute?.directions?.[0]?.instruction || "Select a route and tap Start GPS.";
   state.gps.navigationMarker.bindTooltip(`GPS: ${nextInstruction}`, {
     permanent: false,
     direction: "top",
@@ -1789,25 +1868,26 @@ function drawGpsRoutesOnMap() {
   state.gps.routePolylinesLayer.clearLayers();
   state.gps.routeChoices.forEach((route) => {
     const isActive = route.id === state.gps.activeRouteId;
+    const isNavigating = route.id === state.gps.navigationRouteId;
     const polyline = L.polyline(route.path, {
       color: mapGpsRouteColor(route.riskLevel),
-      weight: isActive ? 5 : 3.5,
-      opacity: isActive ? 0.9 : 0.55,
-      dashArray: isActive ? null : "6 5",
+      weight: isNavigating ? 6 : isActive ? 5 : 3.5,
+      opacity: isNavigating ? 0.98 : isActive ? 0.9 : 0.55,
+      dashArray: isNavigating || isActive ? null : "6 5",
     });
-    polyline.on("click", () => setGpsRouteSelection(route.id));
+    polyline.on("click", () => activateGpsNavigation(route.id));
     if (isActive) {
       polyline.bindPopup(
         `<strong>${escapeHtml(route.title)}</strong><br>` +
           `${escapeHtml(mapGpsRiskLabel(route.riskLevel))} • ${escapeHtml(
             formatDurationMinutes(route.etaMinutes)
-          )}`
+          )}${isNavigating ? "<br><em>GPS active on this route</em>" : ""}`
       );
     }
     polyline.addTo(state.gps.routePolylinesLayer);
   });
-  const activeRoute = state.gps.routeChoices.find((route) => route.id === state.gps.activeRouteId);
-  renderGpsNavigationGuide(activeRoute);
+  const navigationRoute = state.gps.routeChoices.find((route) => route.id === state.gps.navigationRouteId) || null;
+  renderGpsNavigationGuide(navigationRoute);
 }
 
 function renderGpsRouteOptions() {
@@ -1831,17 +1911,20 @@ function renderGpsRouteOptions() {
       const riskClass = mapGpsRiskClass(route.riskLevel);
       const recommendedClass = route.id === state.gps.routeChoices[0]?.id ? "recommended" : "";
       const selectedRating = Number(state.gps.routeRatings[route.id] || 0);
+      const isNavigating = route.id === state.gps.navigationRouteId;
+      const visibleDirections = getVisibleRouteDirections(route);
+      const displayEtaMinutes = getDirectionsDurationMinutes(visibleDirections) || route.etaMinutes;
+      const selectLabel = isNavigating ? "Using GPS" : route.id === state.gps.activeRouteId ? "Start GPS" : "Select";
       return `
-        <article class="route-option ${activeClass} ${riskClass} ${recommendedClass}">
-          <button type="button" class="tiny-btn" data-action="select-gps-route" data-route-id="${route.id}" data-route-key="${route.routeKey}">
-            Select
+        <article class="route-option ${activeClass} ${riskClass} ${recommendedClass}" data-route-id="${route.id}" data-route-key="${route.routeKey}">
+          <button type="button" class="tiny-btn ${isNavigating ? "is-active" : ""}" data-action="select-gps-route" data-route-id="${route.id}" data-route-key="${route.routeKey}">
+            ${selectLabel}
           </button>
           <strong>${escapeHtml(route.title)}</strong>
-          <small>${route.etaMinutes} min • ${escapeHtml(mapGpsRiskLabel(route.riskLevel))} • Score ${route.score}</small>
+          <small>${displayEtaMinutes} min • ${escapeHtml(mapGpsRiskLabel(route.riskLevel))} • Score ${route.score}</small>
           <small class="route-status-note">${route.nearbyIncidents} nearby alerts on this path</small>
           <ol class="route-directions" aria-label="Route directions">
-            ${(Array.isArray(route.directions) ? route.directions : [])
-              .slice(0, GPS_MAX_VISIBLE_DIRECTIONS)
+            ${visibleDirections
               .map(
                 (step) =>
                   `<li><span class="step-mode">${escapeHtml(step.label)}:</span> ${escapeHtml(
@@ -1885,6 +1968,9 @@ function syncLegacyRouteSelection() {
 
 function setGpsWaypoint(latlng, pointType, options = {}) {
   if (!latlng || !state.gps.map) return;
+  if (!options.preserveNavigation) {
+    state.gps.navigationRouteId = null;
+  }
   if (pointType === "from") {
     state.gps.fromLatLng = latlng;
     setGpsInputStreetName(latlng, "from", options);
@@ -2018,6 +2104,7 @@ function generateGpsRoutes(options = {}) {
   });
 
   state.gps.routeChoices = rankGpsRoutes([routeA, routeB, routeC]);
+  state.gps.navigationRouteId = null;
   setGpsRouteSelection(state.gps.routeChoices[0]?.id || "A");
   updateGpsHint();
   if (!options.silent) {
@@ -2031,6 +2118,7 @@ function generateGpsRoutes(options = {}) {
     if (!realRoutes.length) return;
     if (state.gps.routeRequestToken !== currentRequestToken) return;
     state.gps.routeChoices = rankGpsRoutes(realRoutes);
+    state.gps.navigationRouteId = null;
     setGpsRouteSelection(state.gps.routeChoices[0]?.id || state.gps.activeRouteId || "A");
     updateGpsHint("Live road route loaded. Tap options to preview turns.");
     if (!options.silent) {
@@ -2196,7 +2284,10 @@ function ensureGpsMap() {
       } else {
         safeSetLatLng(state.gps.userMarker, latlng);
       }
-      updateGpsNavigationMarker(latlng, { snapToRoute: true, force: true });
+      updateGpsNavigationMarker(latlng, {
+        snapToRoute: Boolean(state.gps.navigationRouteId),
+        force: true,
+      });
       if (!state.gps.fromLatLng) {
         setGpsWaypoint(latlng, "from");
       }
@@ -2223,9 +2314,11 @@ function ensureGpsMap() {
       } else {
         safeSetLatLng(state.gps.userMarker, latlng);
       }
-      updateGpsNavigationMarker(latlng, { snapToRoute: true });
+      updateGpsNavigationMarker(latlng, { snapToRoute: Boolean(state.gps.navigationRouteId) });
       const gpsPageActive = document.querySelector(".page.active")?.dataset.page === "gps";
-      if (gpsPageActive && !state.gps.fromLatLng) {
+      if (gpsPageActive && state.gps.navigationRouteId) {
+        mapInstance.panTo(latlng, { animate: true, duration: 0.3 });
+      } else if (gpsPageActive && !state.gps.fromLatLng) {
         mapInstance.panTo(latlng, { animate: true, duration: 0.3 });
       }
     },
@@ -2247,7 +2340,8 @@ function bindGpsUiEvents() {
       const selectButton = target.closest("[data-action='select-gps-route']");
       if (selectButton instanceof HTMLElement) {
         const routeId = selectButton.dataset.routeId;
-        if (routeId) setGpsRouteSelection(routeId);
+        if (routeId) activateGpsNavigation(routeId);
+        return;
       }
 
       const rateButton = target.closest(".gps-rate-btn");
@@ -2263,6 +2357,13 @@ function bindGpsUiEvents() {
         }
         const saved = await saveRouteFeedback(routeId, rating);
         if (saved) showToast("Thanks for rating this route.");
+        return;
+      }
+
+      const routeCard = target.closest(".route-option");
+      if (routeCard instanceof HTMLElement) {
+        const routeId = routeCard.dataset.routeId;
+        if (routeId) setGpsRouteSelection(routeId);
       }
     });
   }
