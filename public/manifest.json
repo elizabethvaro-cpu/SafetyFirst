@@ -1,0 +1,22 @@
+{
+  "name": "SafetyFirst Safety App",
+  "short_name": "SafetyFirst",
+  "description": "Navigate safer routes, report incidents, and access SOS tools.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#000000",
+  "theme_color": "#5c3393",
+  "icons": [
+    {
+      "src": "/icons/icon-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/icons/icon-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
