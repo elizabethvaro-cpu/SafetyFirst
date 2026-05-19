@@ -1163,13 +1163,38 @@ fieldset {
 }
 
 body.dark {
-  --bg: #0c1424;
-  --surface: #151f33;
-  --surface-alt: #1a2841;
-  --text: #f3f4f6;
-  --muted: #c4cddd;
-  --line: #2a3652;
+  --bg: #05070d;
+  --bg-accent-start: #05070d;
+  --surface: #101726;
+  --surface-alt: #161f33;
+  --text: #f8fbff;
+  --muted: #d5deef;
+  --line: #33415d;
   --shadow: 0 12px 26px rgba(0, 0, 0, 0.35);
+  background: #05070d;
+}
+
+body.dark .subtle,
+body.dark .muted-note,
+body.dark .map-subtitle,
+body.dark .route-option small,
+body.dark .route-directions li span:last-child,
+body.dark .ad-label,
+body.dark .profile-list-item p,
+body.dark .card p {
+  color: var(--muted);
+}
+
+body.dark .link-btn {
+  color: #8fb4ff;
+}
+
+body.dark .nav-item {
+  color: #c9d5eb;
+}
+
+body.dark .nav-icon {
+  color: #e8f0ff;
 }
 
 body.dark .map-overlay.bottom {
