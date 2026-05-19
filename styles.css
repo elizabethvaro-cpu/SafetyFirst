@@ -55,6 +55,13 @@ body {
   color: var(--text);
 }
 
+html,
+body {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
 .app-shell {
   min-height: 100vh;
   width: 100%;
@@ -102,7 +109,7 @@ h3 {
 }
 
 .page-container {
-  padding: 0.55rem 1rem 5.4rem;
+  padding: 0.55rem 1rem calc(5.4rem + env(safe-area-inset-bottom));
 }
 
 .page {
@@ -184,11 +191,19 @@ h3 {
   border-radius: 0.65rem;
   background: var(--surface-alt);
   border: 1px dashed var(--line);
+  overflow: hidden;
 }
 
 .ad-unit-slot.banner {
   width: min(100%, 728px);
   min-height: 90px;
+}
+
+.ad-unit-slot.banner iframe,
+.ad-unit-slot.banner img,
+.ad-unit-slot.banner object,
+.ad-unit-slot.banner embed {
+  max-width: 100%;
 }
 
 .hidden {
@@ -212,6 +227,11 @@ h3 {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
+  gap: 0.5rem;
+}
+
+.map-top-meta > :first-child {
+  min-width: 0;
 }
 
 .map-title {
@@ -783,9 +803,9 @@ fieldset {
 
 .route-map.is-half {
   position: fixed;
-  left: 0.75rem;
-  right: 0.75rem;
-  bottom: 5.2rem;
+  left: max(0.75rem, env(safe-area-inset-left));
+  right: max(0.75rem, env(safe-area-inset-right));
+  bottom: calc(5.2rem + env(safe-area-inset-bottom));
   z-index: 980;
   box-shadow: 0 14px 30px rgba(15, 23, 42, 0.24);
 }
@@ -797,7 +817,10 @@ fieldset {
   border-radius: 0;
   border: 0;
   box-shadow: none;
-  padding: 0.9rem;
+  padding-top: max(0.9rem, env(safe-area-inset-top));
+  padding-right: max(0.9rem, env(safe-area-inset-right));
+  padding-bottom: max(0.9rem, env(safe-area-inset-bottom));
+  padding-left: max(0.9rem, env(safe-area-inset-left));
 }
 
 .route-map.is-half #gps-live-map {
@@ -1109,6 +1132,7 @@ fieldset {
   grid-template-columns: repeat(5, 1fr);
   background: var(--surface);
   box-shadow: 0 -8px 26px rgba(32, 53, 86, 0.16);
+  padding-bottom: env(safe-area-inset-bottom);
 }
 
 .nav-item {
@@ -1287,7 +1311,7 @@ body.dark .ad-unit-slot {
   }
 
   .page-container {
-    padding: 0.5rem 0.75rem 5.2rem;
+    padding: 0.5rem 0.75rem calc(5.2rem + env(safe-area-inset-bottom));
   }
 
   h1 {
@@ -1322,6 +1346,32 @@ body.dark .ad-unit-slot {
     flex-wrap: wrap;
   }
 
+}
+
+@media (max-width: 480px) {
+  .app-header {
+    padding-top: max(0.9rem, env(safe-area-inset-top));
+  }
+
+  .page-container {
+    padding-inline: 0.75rem;
+  }
+
+  #live-map {
+    height: min(52vh, 360px);
+  }
+
+  #gps-live-map {
+    height: 168px;
+  }
+
+  .map-top-meta {
+    flex-wrap: wrap;
+  }
+
+  .map-tools {
+    margin-left: auto;
+  }
 }
 
 @media (min-width: 768px) {
