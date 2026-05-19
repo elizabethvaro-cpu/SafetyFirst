@@ -68,6 +68,8 @@ const communityRouteNotesInput = document.getElementById("community-route-notes"
 const communityRouteSafetyLevelInput = document.getElementById("community-route-safety-level");
 const communityRouteRatingInput = document.getElementById("community-route-rating");
 const communityRouteTagsInput = document.getElementById("community-route-tags");
+const adUnitCompactContainer = document.getElementById("ad-unit-compact");
+const adUnitTowerContainer = document.getElementById("ad-unit-tower");
 
 const MAP_DEFAULT_CENTER = { lat: 40.7128, lng: -74.006 };
 const MAP_SEARCH_RADIUS_METERS = 1207;
@@ -90,6 +92,27 @@ const GPS_REVERSE_GEOCODE_TIMEOUT_MS = 3500;
 const GPS_FORWARD_GEOCODE_URL = "https://nominatim.openstreetmap.org/search";
 const GPS_FORWARD_GEOCODE_TIMEOUT_MS = 4500;
 const ACCENT_COLOR_STORAGE_KEY = "safesteps_accent_color";
+const AD_SCRIPT_HOST = "https://www.highperformanceformat.com";
+const AD_UNIT_CONFIGS = [
+  {
+    key: "ac17e1582a3f733061012d2244bff4d0",
+    format: "iframe",
+    height: 50,
+    width: 320,
+    params: {},
+    container: adUnitCompactContainer,
+  },
+  {
+    key: "30341936a7d1389b8f994d48acb24c83",
+    format: "iframe",
+    height: 300,
+    width: 160,
+    params: {},
+    container: adUnitTowerContainer,
+  },
+];
+
+let adUnitsInitPromise = null;
 const ACCENT_PALETTES = {
   blue: {
     primary: "#2b59ff",
@@ -655,6 +678,74 @@ function showToast(message) {
   }
   toast.classList.add("show");
   setTimeout(() => toast.classList.remove("show"), 2200);
+}
+
+function renderAdFallback(container, width, height) {
+  if (!container) return;
+  container.innerHTML = "";
+  const fallback = document.createElement("small");
+  fallback.className = "muted-note";
+  fallback.textContent = `Ad slot ${width}x${height}`;
+  container.appendChild(fallback);
+}
+
+function mountAdUnit(unitConfig) {
+  return new Promise((resolve) => {
+    const container = unitConfig?.container;
+    if (!container) {
+      resolve();
+      return;
+    }
+    if (container.dataset.loaded === "true") {
+      resolve();
+      return;
+    }
+    container.dataset.loaded = "true";
+    container.innerHTML = "";
+
+    const optionsScript = document.createElement("script");
+    optionsScript.type = "text/javascript";
+    optionsScript.text = `window.atOptions = ${JSON.stringify({
+      key: unitConfig.key,
+      format: unitConfig.format,
+      height: unitConfig.height,
+      width: unitConfig.width,
+      params: unitConfig.params || {},
+    })};`;
+
+    const invokeScript = document.createElement("script");
+    invokeScript.type = "text/javascript";
+    invokeScript.src = `${AD_SCRIPT_HOST}/${unitConfig.key}/invoke.js`;
+    invokeScript.async = false;
+
+    const finalize = () => {
+      try {
+        delete window.atOptions;
+      } catch {
+        window.atOptions = undefined;
+      }
+      resolve();
+    };
+
+    invokeScript.onload = finalize;
+    invokeScript.onerror = () => {
+      container.dataset.loaded = "failed";
+      renderAdFallback(container, unitConfig.width, unitConfig.height);
+      finalize();
+    };
+
+    container.append(optionsScript, invokeScript);
+  });
+}
+
+function initializeAdUnits() {
+  if (adUnitsInitPromise) return adUnitsInitPromise;
+  adUnitsInitPromise = (async () => {
+    for (const unitConfig of AD_UNIT_CONFIGS) {
+      await mountAdUnit(unitConfig);
+    }
+  })();
+  return adUnitsInitPromise;
 }
 
 function normalizeTranslationLanguage(language) {
@@ -4279,6 +4370,7 @@ applyThemeMode(themeSelect.value || "light");
 
 async function initApp() {
   await applyLanguage("en");
+  void initializeAdUnits();
   setProfileDisplayName(state.currentProfileName);
   renderSimpleProfiles();
   initializeMap();
