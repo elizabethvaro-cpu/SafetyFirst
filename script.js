@@ -171,6 +171,29 @@ const labels = {
   settings: "Settings",
 };
 
+const BUILT_IN_LANGUAGES = new Set(["en", "es", "fr"]);
+const TRANSLATE_LANGUAGE_MAP = {
+  zh: "zh-CN",
+  hi: "hi",
+  es: "es",
+  fr: "fr",
+  ar: "ar",
+  bn: "bn",
+  pt: "pt",
+  ru: "ru",
+  ur: "ur",
+  id: "id",
+  de: "de",
+  ja: "ja",
+  sw: "sw",
+  mr: "mr",
+  tr: "tr",
+};
+
+let googleTranslateLoading = false;
+let googleTranslateReady = false;
+let pendingGoogleLanguage = null;
+
 const state = {
   currentUserId: null,
   currentProfileName: "Community Member",
@@ -548,6 +571,75 @@ function showToast(message) {
   setTimeout(() => toast.classList.remove("show"), 2200);
 }
 
+function ensureGoogleTranslateHost() {
+  let host = document.getElementById("google_translate_element");
+  if (host) return host;
+  host = document.createElement("div");
+  host.id = "google_translate_element";
+  host.style.display = "none";
+  document.body.appendChild(host);
+  return host;
+}
+
+function dispatchGoogleLanguage(languageCode) {
+  const combo = document.querySelector(".goog-te-combo");
+  if (!(combo instanceof HTMLSelectElement)) return false;
+  if (combo.value !== languageCode) {
+    combo.value = languageCode;
+    combo.dispatchEvent(new Event("change"));
+  } else {
+    combo.dispatchEvent(new Event("change"));
+  }
+  return true;
+}
+
+function applyGooglePageTranslation(language) {
+  const targetLanguage = TRANSLATE_LANGUAGE_MAP[language] || "en";
+  if (targetLanguage === "en" && !googleTranslateReady) return;
+
+  if (googleTranslateReady) {
+    if (dispatchGoogleLanguage(targetLanguage)) return;
+    pendingGoogleLanguage = targetLanguage;
+    window.setTimeout(() => {
+      if (pendingGoogleLanguage) {
+        dispatchGoogleLanguage(pendingGoogleLanguage);
+      }
+    }, 250);
+    return;
+  }
+
+  pendingGoogleLanguage = targetLanguage;
+  if (googleTranslateLoading) return;
+  googleTranslateLoading = true;
+  ensureGoogleTranslateHost();
+  window.googleTranslateElementInit = () => {
+    if (!(window.google && window.google.translate && window.google.translate.TranslateElement)) return;
+    new window.google.translate.TranslateElement(
+      {
+        pageLanguage: "en",
+        autoDisplay: false,
+      },
+      "google_translate_element"
+    );
+    googleTranslateReady = true;
+    googleTranslateLoading = false;
+    if (pendingGoogleLanguage) {
+      const pending = pendingGoogleLanguage;
+      pendingGoogleLanguage = null;
+      window.setTimeout(() => dispatchGoogleLanguage(pending), 120);
+    }
+  };
+  const script = document.createElement("script");
+  script.src = "https://translate.google.com/translate_a/element.js?cb=googleTranslateElementInit";
+  script.async = true;
+  script.onerror = () => {
+    googleTranslateLoading = false;
+    pendingGoogleLanguage = null;
+    showToast("Language pack unavailable right now.");
+  };
+  document.head.appendChild(script);
+}
+
 function getAccentColorKey(value) {
   return ACCENT_PALETTES[value] ? value : "blue";
 }
@@ -683,7 +775,7 @@ function switchPage(target) {
   refreshActivePageMap(target);
 }
 
-function applyLanguage(language) {
+function renderLanguageCopy(language) {
   const selected = copy[language] || copy.en;
   const i18nElements = document.querySelectorAll("[data-i18n]");
   i18nElements.forEach((el) => {
@@ -692,6 +784,17 @@ function applyLanguage(language) {
   });
   const activePage = document.querySelector(".page.active")?.dataset.page || "map";
   pageTitle.textContent = selected[`${activePage}Title`] || labels[activePage];
+}
+
+function applyLanguage(language) {
+  renderLanguageCopy(language);
+  const needsAutoTranslate = !BUILT_IN_LANGUAGES.has(language);
+  if (needsAutoTranslate) {
+    applyGooglePageTranslation(language);
+    return;
+  }
+  applyGooglePageTranslation("en");
+  window.setTimeout(() => renderLanguageCopy(language), 180);
 }
 
 function text(key) {
