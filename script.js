@@ -91,6 +91,8 @@ const GPS_REVERSE_GEOCODE_TIMEOUT_MS = 3500;
 const GPS_FORWARD_GEOCODE_URL = "https://nominatim.openstreetmap.org/search";
 const GPS_FORWARD_GEOCODE_TIMEOUT_MS = 4500;
 const ACCENT_COLOR_STORAGE_KEY = "safesteps_accent_color";
+const LOCATION_PERMISSION_GUIDANCE =
+  "Go to your device's location setting to give this app access to your location";
 const INCIDENT_COORDINATE_CACHE_KEY = "safesteps_incident_coordinate_cache_v1";
 const INCIDENT_COORDINATE_CACHE_LOOKUP_LIMIT = 20;
 const INCIDENT_COORDINATE_CACHE_MAX_ENTRIES = 1000;
@@ -3927,7 +3929,7 @@ function initializeMap() {
     (error) => {
       const message =
         error.code === 1
-          ? "Location permission denied"
+          ? `Location permission denied. ${LOCATION_PERMISSION_GUIDANCE}`
           : error.code === 2
             ? "Location unavailable"
             : "Location request timed out";
