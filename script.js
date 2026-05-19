@@ -189,10 +189,18 @@ const TRANSLATE_LANGUAGE_MAP = {
   mr: "mr",
   tr: "tr",
 };
-
-let googleTranslateLoading = false;
-let googleTranslateReady = false;
-let pendingGoogleLanguage = null;
+const DOM_TRANSLATION_ATTRIBUTE_KEYS = ["placeholder", "title", "aria-label"];
+const DOM_TRANSLATION_SKIP_SELECTOR = "script,style,noscript,iframe,.nav-icon";
+const runtimeTranslationCache = new Map();
+const trackedTextNodes = new Set();
+const trackedAttrElements = new Set();
+const originalTextByNode = new WeakMap();
+const originalAttrsByElement = new WeakMap();
+let runtimeTranslationObserver = null;
+let runtimeTranslationTimer = null;
+let runtimeTranslationActiveLanguage = "en";
+let runtimeTranslationRunId = 0;
+let runtimeTranslationApplying = false;
 
 const state = {
   currentUserId: null,
@@ -334,6 +342,15 @@ const copy = {
     lightMode: "Light Mode",
     darkMode: "Dark Mode",
     language: "Language",
+    accentColor: "Accent Color",
+    colorBlue: "Blue",
+    colorRed: "Red",
+    colorOrange: "Orange",
+    colorYellow: "Yellow",
+    colorGreen: "Green",
+    colorPurple: "Purple",
+    colorPink: "Pink",
+    savePreferencesCta: "Save Preferences",
     pushAlerts: "Push danger alerts",
     locationSharing: "Auto location sharing",
     emergencyPreferences: "Emergency Preferences",
@@ -362,6 +379,20 @@ const copy = {
     profileNameRequired: "Please enter a display name.",
     profileSchemaMissing:
       "Profile table is missing. Run the latest SQL schema in Supabase.",
+    reportLocationPlaceholder: "Street / Area",
+    reportDetailsPlaceholder: "Tell us what happened...",
+    contactNamePlaceholder: "Contact name",
+    contactPhonePlaceholder: "Phone number",
+    contactRelationshipPlaceholder: "Relationship (optional)",
+    originPlaceholder: "Your starting point",
+    destinationPlaceholder: "Destination",
+    communityRouteStartPlaceholder: "Where did you start?",
+    communityRouteDestinationPlaceholder: "Where did you end?",
+    communityRouteNotesPlaceholder: "Any notes about why this route felt safe?",
+    communityRouteTagsPlaceholder: "well-lit, busy area, police presence",
+    profileNamePlaceholder: "How your name appears in the app",
+    simpleProfileNamePlaceholder: "Enter name",
+    simpleProfileEmailPlaceholder: "Enter email",
   },
   es: {
     mapTitle: "Mapa de Seguridad",
@@ -434,6 +465,15 @@ const copy = {
     lightMode: "Modo claro",
     darkMode: "Modo oscuro",
     language: "Idioma",
+    accentColor: "Color de acento",
+    colorBlue: "Azul",
+    colorRed: "Rojo",
+    colorOrange: "Naranja",
+    colorYellow: "Amarillo",
+    colorGreen: "Verde",
+    colorPurple: "Morado",
+    colorPink: "Rosa",
+    savePreferencesCta: "Guardar preferencias",
     pushAlerts: "Alertas de peligro",
     locationSharing: "Compartir ubicacion automaticamente",
     emergencyPreferences: "Preferencias de emergencia",
@@ -462,6 +502,20 @@ const copy = {
     profileNameRequired: "Ingresa un nombre visible.",
     profileSchemaMissing:
       "Falta la tabla de perfil. Ejecuta el SQL mas reciente en Supabase.",
+    reportLocationPlaceholder: "Calle / Zona",
+    reportDetailsPlaceholder: "Cuentanos que paso...",
+    contactNamePlaceholder: "Nombre del contacto",
+    contactPhonePlaceholder: "Numero de telefono",
+    contactRelationshipPlaceholder: "Relacion (opcional)",
+    originPlaceholder: "Tu punto de partida",
+    destinationPlaceholder: "Destino",
+    communityRouteStartPlaceholder: "Desde donde empezaste?",
+    communityRouteDestinationPlaceholder: "Donde terminaste?",
+    communityRouteNotesPlaceholder: "Notas sobre por que esta ruta fue segura?",
+    communityRouteTagsPlaceholder: "bien iluminado, zona concurrida, presencia policial",
+    profileNamePlaceholder: "Como aparece tu nombre en la app",
+    simpleProfileNamePlaceholder: "Ingresa nombre",
+    simpleProfileEmailPlaceholder: "Ingresa correo",
   },
   fr: {
     mapTitle: "Carte de Securite",
@@ -534,6 +588,15 @@ const copy = {
     lightMode: "Mode clair",
     darkMode: "Mode sombre",
     language: "Langue",
+    accentColor: "Couleur d'accent",
+    colorBlue: "Bleu",
+    colorRed: "Rouge",
+    colorOrange: "Orange",
+    colorYellow: "Jaune",
+    colorGreen: "Vert",
+    colorPurple: "Violet",
+    colorPink: "Rose",
+    savePreferencesCta: "Enregistrer les preferences",
     pushAlerts: "Alertes de danger push",
     locationSharing: "Partage automatique de position",
     emergencyPreferences: "Preferences d'urgence",
@@ -562,82 +625,236 @@ const copy = {
     profileNameRequired: "Veuillez saisir un nom affiche.",
     profileSchemaMissing:
       "La table de profil est absente. Executez le SQL le plus recent dans Supabase.",
+    reportLocationPlaceholder: "Rue / Quartier",
+    reportDetailsPlaceholder: "Decrivez ce qui s'est passe...",
+    contactNamePlaceholder: "Nom du contact",
+    contactPhonePlaceholder: "Numero de telephone",
+    contactRelationshipPlaceholder: "Relation (optionnel)",
+    originPlaceholder: "Votre point de depart",
+    destinationPlaceholder: "Destination",
+    communityRouteStartPlaceholder: "Ou avez-vous commence ?",
+    communityRouteDestinationPlaceholder: "Ou avez-vous termine ?",
+    communityRouteNotesPlaceholder: "Notes sur pourquoi cet itineraire etait sur ?",
+    communityRouteTagsPlaceholder: "bien eclaire, zone animee, presence policiere",
+    profileNamePlaceholder: "Comment votre nom apparait dans l'application",
+    simpleProfileNamePlaceholder: "Saisir le nom",
+    simpleProfileEmailPlaceholder: "Saisir l'email",
   },
 };
 
 function showToast(message) {
-  toast.textContent = message;
+  const rawMessage = String(message || "");
+  toast.textContent = rawMessage;
+  if (!BUILT_IN_LANGUAGES.has(languageSelect.value)) {
+    const selectedLanguage = languageSelect.value;
+    void translateTextRuntime(rawMessage, selectedLanguage).then((translatedMessage) => {
+      if (languageSelect.value !== selectedLanguage) return;
+      if (toast.textContent !== rawMessage) return;
+      toast.textContent = translatedMessage;
+    });
+  }
   toast.classList.add("show");
   setTimeout(() => toast.classList.remove("show"), 2200);
 }
 
-function ensureGoogleTranslateHost() {
-  let host = document.getElementById("google_translate_element");
-  if (host) return host;
-  host = document.createElement("div");
-  host.id = "google_translate_element";
-  host.style.display = "none";
-  document.body.appendChild(host);
-  return host;
+function normalizeTranslationLanguage(language) {
+  return TRANSLATE_LANGUAGE_MAP[language] || "en";
 }
 
-function dispatchGoogleLanguage(languageCode) {
-  const combo = document.querySelector(".goog-te-combo");
-  if (!(combo instanceof HTMLSelectElement)) return false;
-  if (combo.value !== languageCode) {
-    combo.value = languageCode;
-    combo.dispatchEvent(new Event("change"));
-  } else {
-    combo.dispatchEvent(new Event("change"));
+async function translateTextRuntime(textValue, language) {
+  const sourceText = String(textValue || "");
+  const trimmed = sourceText.trim();
+  const targetLanguage = normalizeTranslationLanguage(language);
+  if (!trimmed || targetLanguage === "en") return sourceText;
+  const cacheKey = `${targetLanguage}::${sourceText}`;
+  if (runtimeTranslationCache.has(cacheKey)) {
+    return runtimeTranslationCache.get(cacheKey);
   }
-  return true;
+  const query = new URLSearchParams({
+    client: "gtx",
+    sl: "en",
+    tl: targetLanguage,
+    dt: "t",
+    q: sourceText,
+  });
+  try {
+    const response = await fetch(`https://translate.googleapis.com/translate_a/single?${query.toString()}`);
+    if (!response.ok) return sourceText;
+    const payload = await response.json();
+    const translated = Array.isArray(payload?.[0])
+      ? payload[0]
+          .map((entry) => (Array.isArray(entry) ? entry[0] : ""))
+          .join("")
+          .trim()
+      : "";
+    const resolved = translated || sourceText;
+    runtimeTranslationCache.set(cacheKey, resolved);
+    return resolved;
+  } catch {
+    return sourceText;
+  }
 }
 
-function applyGooglePageTranslation(language) {
-  const targetLanguage = TRANSLATE_LANGUAGE_MAP[language] || "en";
-  if (targetLanguage === "en" && !googleTranslateReady) return;
+function collectTranslatableTextNodes(root = document.body) {
+  if (!root) return [];
+  const textNodes = [];
+  const walker = document.createTreeWalker(
+    root,
+    NodeFilter.SHOW_TEXT,
+    {
+      acceptNode(node) {
+        const parent = node.parentElement;
+        if (!parent) return NodeFilter.FILTER_REJECT;
+        if (parent.closest(DOM_TRANSLATION_SKIP_SELECTOR)) return NodeFilter.FILTER_REJECT;
+        if (!String(node.textContent || "").trim()) return NodeFilter.FILTER_REJECT;
+        return NodeFilter.FILTER_ACCEPT;
+      },
+    },
+    false
+  );
+  let currentNode = walker.nextNode();
+  while (currentNode) {
+    textNodes.push(currentNode);
+    currentNode = walker.nextNode();
+  }
+  return textNodes;
+}
 
-  if (googleTranslateReady) {
-    if (dispatchGoogleLanguage(targetLanguage)) return;
-    pendingGoogleLanguage = targetLanguage;
-    window.setTimeout(() => {
-      if (pendingGoogleLanguage) {
-        dispatchGoogleLanguage(pendingGoogleLanguage);
-      }
-    }, 250);
+function collectTranslatableAttributeTargets(root = document.body) {
+  if (!root) return [];
+  const selector = DOM_TRANSLATION_ATTRIBUTE_KEYS.map((key) => `[${key}]`).join(",");
+  const elements = [...root.querySelectorAll(selector)];
+  const targets = [];
+  elements.forEach((element) => {
+    if (!(element instanceof HTMLElement)) return;
+    if (element.closest(DOM_TRANSLATION_SKIP_SELECTOR)) return;
+    DOM_TRANSLATION_ATTRIBUTE_KEYS.forEach((attributeKey) => {
+      const attributeValue = element.getAttribute(attributeKey);
+      if (!attributeValue || !attributeValue.trim()) return;
+      targets.push({
+        element,
+        attributeKey,
+      });
+    });
+  });
+  return targets;
+}
+
+function stopRuntimeTranslationObserver() {
+  if (runtimeTranslationObserver) {
+    runtimeTranslationObserver.disconnect();
+    runtimeTranslationObserver = null;
+  }
+  if (runtimeTranslationTimer) {
+    window.clearTimeout(runtimeTranslationTimer);
+    runtimeTranslationTimer = null;
+  }
+}
+
+function restoreRuntimeDomText() {
+  trackedTextNodes.forEach((node) => {
+    if (!node.isConnected) return;
+    const originalText = originalTextByNode.get(node);
+    if (typeof originalText === "string") {
+      node.textContent = originalText;
+    }
+  });
+  trackedAttrElements.forEach((element) => {
+    if (!element.isConnected) return;
+    const originalAttrs = originalAttrsByElement.get(element);
+    if (!originalAttrs) return;
+    Object.entries(originalAttrs).forEach(([attributeKey, value]) => {
+      element.setAttribute(attributeKey, value);
+    });
+  });
+}
+
+async function applyRuntimeDomTranslation(language) {
+  const targetLanguage = normalizeTranslationLanguage(language);
+  const currentRunId = ++runtimeTranslationRunId;
+  if (targetLanguage === "en") {
+    runtimeTranslationActiveLanguage = "en";
+    restoreRuntimeDomText();
     return;
   }
 
-  pendingGoogleLanguage = targetLanguage;
-  if (googleTranslateLoading) return;
-  googleTranslateLoading = true;
-  ensureGoogleTranslateHost();
-  window.googleTranslateElementInit = () => {
-    if (!(window.google && window.google.translate && window.google.translate.TranslateElement)) return;
-    new window.google.translate.TranslateElement(
-      {
-        pageLanguage: "en",
-        autoDisplay: false,
-      },
-      "google_translate_element"
-    );
-    googleTranslateReady = true;
-    googleTranslateLoading = false;
-    if (pendingGoogleLanguage) {
-      const pending = pendingGoogleLanguage;
-      pendingGoogleLanguage = null;
-      window.setTimeout(() => dispatchGoogleLanguage(pending), 120);
+  runtimeTranslationActiveLanguage = language;
+  const textNodes = collectTranslatableTextNodes(document.body);
+  const attrTargets = collectTranslatableAttributeTargets(document.body);
+  const sourceStrings = new Set();
+
+  textNodes.forEach((node) => {
+    if (!originalTextByNode.has(node)) {
+      originalTextByNode.set(node, node.textContent || "");
+      trackedTextNodes.add(node);
     }
-  };
-  const script = document.createElement("script");
-  script.src = "https://translate.google.com/translate_a/element.js?cb=googleTranslateElementInit";
-  script.async = true;
-  script.onerror = () => {
-    googleTranslateLoading = false;
-    pendingGoogleLanguage = null;
-    showToast("Language pack unavailable right now.");
-  };
-  document.head.appendChild(script);
+    sourceStrings.add(originalTextByNode.get(node) || "");
+  });
+
+  attrTargets.forEach(({ element, attributeKey }) => {
+    if (!originalAttrsByElement.has(element)) {
+      originalAttrsByElement.set(element, {});
+      trackedAttrElements.add(element);
+    }
+    const snapshot = originalAttrsByElement.get(element);
+    if (!(attributeKey in snapshot)) {
+      snapshot[attributeKey] = element.getAttribute(attributeKey) || "";
+    }
+    sourceStrings.add(snapshot[attributeKey]);
+  });
+
+  const translationMap = new Map();
+  runtimeTranslationApplying = true;
+  try {
+    await Promise.all(
+      [...sourceStrings].map(async (source) => {
+        const translated = await translateTextRuntime(source, language);
+        translationMap.set(source, translated);
+      })
+    );
+  } finally {
+    runtimeTranslationApplying = false;
+  }
+
+  if (currentRunId !== runtimeTranslationRunId) return;
+
+  textNodes.forEach((node) => {
+    const source = originalTextByNode.get(node);
+    if (typeof source !== "string") return;
+    node.textContent = translationMap.get(source) || source;
+  });
+
+  attrTargets.forEach(({ element, attributeKey }) => {
+    const snapshot = originalAttrsByElement.get(element);
+    if (!snapshot) return;
+    const source = snapshot[attributeKey];
+    if (typeof source !== "string") return;
+    element.setAttribute(attributeKey, translationMap.get(source) || source);
+  });
+}
+
+function scheduleRuntimeDomTranslation() {
+  if (runtimeTranslationApplying) return;
+  if (BUILT_IN_LANGUAGES.has(runtimeTranslationActiveLanguage)) return;
+  if (runtimeTranslationTimer) {
+    window.clearTimeout(runtimeTranslationTimer);
+  }
+  runtimeTranslationTimer = window.setTimeout(() => {
+    runtimeTranslationTimer = null;
+    void applyRuntimeDomTranslation(runtimeTranslationActiveLanguage);
+  }, 180);
+}
+
+function ensureRuntimeTranslationObserver() {
+  if (runtimeTranslationObserver) return;
+  runtimeTranslationObserver = new MutationObserver(() => {
+    scheduleRuntimeDomTranslation();
+  });
+  runtimeTranslationObserver.observe(document.body, {
+    childList: true,
+    subtree: true,
+    characterData: true,
+  });
 }
 
 function getAccentColorKey(value) {
@@ -773,6 +990,9 @@ function switchPage(target) {
   navItems.forEach((item) => item.classList.toggle("active", item.dataset.target === target));
   pageTitle.textContent = (copy[languageSelect.value] || copy.en)[`${target}Title`] || labels[target];
   refreshActivePageMap(target);
+  if (!BUILT_IN_LANGUAGES.has(languageSelect.value)) {
+    scheduleRuntimeDomTranslation();
+  }
 }
 
 function renderLanguageCopy(language) {
@@ -782,19 +1002,27 @@ function renderLanguageCopy(language) {
     const key = el.dataset.i18n;
     if (selected[key]) el.textContent = selected[key];
   });
+  const placeholderElements = document.querySelectorAll("[data-i18n-placeholder]");
+  placeholderElements.forEach((el) => {
+    const key = el.dataset.i18nPlaceholder;
+    if (!key || !selected[key]) return;
+    el.setAttribute("placeholder", selected[key]);
+  });
   const activePage = document.querySelector(".page.active")?.dataset.page || "map";
   pageTitle.textContent = selected[`${activePage}Title`] || labels[activePage];
 }
 
-function applyLanguage(language) {
+async function applyLanguage(language) {
   renderLanguageCopy(language);
-  const needsAutoTranslate = !BUILT_IN_LANGUAGES.has(language);
-  if (needsAutoTranslate) {
-    applyGooglePageTranslation(language);
+  runtimeTranslationActiveLanguage = language;
+  if (BUILT_IN_LANGUAGES.has(language)) {
+    stopRuntimeTranslationObserver();
+    restoreRuntimeDomText();
+    window.setTimeout(() => renderLanguageCopy(language), 80);
     return;
   }
-  applyGooglePageTranslation("en");
-  window.setTimeout(() => renderLanguageCopy(language), 180);
+  ensureRuntimeTranslationObserver();
+  await applyRuntimeDomTranslation(language);
 }
 
 function text(key) {
@@ -3567,7 +3795,7 @@ async function loadPreferences() {
   document.getElementById("location-sharing").checked = Boolean(data.location_sharing);
   document.getElementById("auto-siren").checked = Boolean(data.auto_siren);
   document.getElementById("share-route").checked = Boolean(data.share_route);
-  applyLanguage(languageSelect.value);
+  void applyLanguage(languageSelect.value);
 }
 
 async function logSosEvent(triggerType) {
@@ -4043,14 +4271,14 @@ accentColorSelect?.addEventListener("change", () => {
 });
 
 languageSelect.addEventListener("change", () => {
-  applyLanguage(languageSelect.value);
+  void applyLanguage(languageSelect.value);
 });
 
 applyAccentColor(readStoredAccentColor(), { persist: false });
 applyThemeMode(themeSelect.value || "light");
 
 async function initApp() {
-  applyLanguage("en");
+  await applyLanguage("en");
   setProfileDisplayName(state.currentProfileName);
   renderSimpleProfiles();
   initializeMap();

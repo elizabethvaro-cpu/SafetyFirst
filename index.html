@@ -133,13 +133,20 @@
               </select>
 
               <label for="report-location" data-i18n="incidentLocation">Location</label>
-              <input id="report-location" type="text" placeholder="Street / Area" required />
+              <input
+                id="report-location"
+                type="text"
+                placeholder="Street / Area"
+                data-i18n-placeholder="reportLocationPlaceholder"
+                required
+              />
 
               <label for="report-details" data-i18n="details">Details</label>
               <textarea
                 id="report-details"
                 rows="4"
                 placeholder="Tell us what happened..."
+                data-i18n-placeholder="reportDetailsPlaceholder"
                 required
               ></textarea>
 
@@ -190,9 +197,26 @@
             <h2 data-i18n="trustedContacts">Trusted Contacts</h2>
             <div id="trusted-contacts-list" class="stack"></div>
             <form id="trusted-contact-form" class="stack">
-              <input id="contact-name" type="text" placeholder="Contact name" required />
-              <input id="contact-phone" type="tel" placeholder="Phone number" required />
-              <input id="contact-relationship" type="text" placeholder="Relationship (optional)" />
+              <input
+                id="contact-name"
+                type="text"
+                placeholder="Contact name"
+                data-i18n-placeholder="contactNamePlaceholder"
+                required
+              />
+              <input
+                id="contact-phone"
+                type="tel"
+                placeholder="Phone number"
+                data-i18n-placeholder="contactPhonePlaceholder"
+                required
+              />
+              <input
+                id="contact-relationship"
+                type="text"
+                placeholder="Relationship (optional)"
+                data-i18n-placeholder="contactRelationshipPlaceholder"
+              />
               <button class="soft-btn" type="submit">Add Trusted Contact</button>
             </form>
             <button class="danger-btn" data-action="silent-sos" data-i18n="silentSos">
@@ -225,10 +249,22 @@
             <h2 data-i18n="safeRouting">Safe Route Planner</h2>
 
             <label for="origin" data-i18n="fromLocation">From</label>
-            <input id="origin" type="text" placeholder="Your starting point" required />
+            <input
+              id="origin"
+              type="text"
+              placeholder="Your starting point"
+              data-i18n-placeholder="originPlaceholder"
+              required
+            />
 
             <label for="destination" data-i18n="toLocation">To</label>
-            <input id="destination" type="text" placeholder="Destination" required />
+            <input
+              id="destination"
+              type="text"
+              placeholder="Destination"
+              data-i18n-placeholder="destinationPlaceholder"
+              required
+            />
 
             <fieldset>
               <legend data-i18n="routePriority">Route Priority</legend>
@@ -267,6 +303,7 @@
                 id="community-route-start"
                 type="text"
                 placeholder="Where did you start?"
+                data-i18n-placeholder="communityRouteStartPlaceholder"
                 required
               />
 
@@ -275,6 +312,7 @@
                 id="community-route-destination"
                 type="text"
                 placeholder="Where did you end?"
+                data-i18n-placeholder="communityRouteDestinationPlaceholder"
                 required
               />
 
@@ -283,6 +321,7 @@
                 id="community-route-notes"
                 rows="3"
                 placeholder="Any notes about why this route felt safe?"
+                data-i18n-placeholder="communityRouteNotesPlaceholder"
               ></textarea>
 
               <label for="community-route-safety-level">Safety level</label>
@@ -308,6 +347,7 @@
                 id="community-route-tags"
                 type="text"
                 placeholder="well-lit, busy area, police presence"
+                data-i18n-placeholder="communityRouteTagsPlaceholder"
               />
 
               <button class="soft-btn" type="submit">Submit Community Route</button>
@@ -345,6 +385,7 @@
                 type="text"
                 maxlength="60"
                 placeholder="How your name appears in the app"
+                data-i18n-placeholder="profileNamePlaceholder"
                 required
               />
               <div class="profile-actions">
@@ -366,6 +407,7 @@
                 id="simple-profile-name"
                 type="text"
                 placeholder="Enter name"
+                data-i18n-placeholder="simpleProfileNamePlaceholder"
                 required
               />
               <label for="simple-profile-email">Email</label>
@@ -373,6 +415,7 @@
                 id="simple-profile-email"
                 type="email"
                 placeholder="Enter email"
+                data-i18n-placeholder="simpleProfileEmailPlaceholder"
                 required
               />
               <button class="primary-btn" type="submit">Save Profile</button>
@@ -389,15 +432,15 @@
               <option value="dark" data-i18n="darkMode">Dark Mode</option>
             </select>
 
-            <label for="accent-color-select">Accent Color</label>
+            <label for="accent-color-select" data-i18n="accentColor">Accent Color</label>
             <select id="accent-color-select">
-              <option value="blue">Blue</option>
-              <option value="red">Red</option>
-              <option value="orange">Orange</option>
-              <option value="yellow">Yellow</option>
-              <option value="green">Green</option>
-              <option value="purple">Purple</option>
-              <option value="pink">Pink</option>
+              <option value="blue" data-i18n="colorBlue">Blue</option>
+              <option value="red" data-i18n="colorRed">Red</option>
+              <option value="orange" data-i18n="colorOrange">Orange</option>
+              <option value="yellow" data-i18n="colorYellow">Yellow</option>
+              <option value="green" data-i18n="colorGreen">Green</option>
+              <option value="purple" data-i18n="colorPurple">Purple</option>
+              <option value="pink" data-i18n="colorPink">Pink</option>
             </select>
 
             <label for="language-select" data-i18n="language">Language</label>
@@ -430,7 +473,7 @@
               <input id="location-sharing" type="checkbox" />
             </label>
 
-            <button class="primary-btn" type="button" id="save-preferences-btn">
+            <button class="primary-btn" type="button" id="save-preferences-btn" data-i18n="savePreferencesCta">
               Save Preferences
             </button>
           </section>
