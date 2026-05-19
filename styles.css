@@ -1201,6 +1201,33 @@ body.dark .map-overlay.bottom {
   background: rgba(21, 31, 51, 0.94);
 }
 
+body.dark .map-details-sheet,
+body.dark .map-incident-detail {
+  background: #0f1829;
+  border-color: #3a4a68;
+}
+
+body.dark .map-sheet-stats p,
+body.dark .map-incident-detail h4 {
+  color: #f8fbff;
+}
+
+body.dark .map-incident-detail p {
+  color: #d5deef;
+}
+
+body.dark .gps-rate-btn {
+  background: #0f1829;
+  border-color: #425273;
+  color: #e8f1ff;
+}
+
+body.dark .gps-rate-btn:hover,
+body.dark .gps-rate-btn:focus-visible {
+  border-color: #79a7ff;
+  color: #f8fbff;
+}
+
 body.dark .gps-rate-btn.is-filled {
   background: var(--rating-fill-bg-dark);
   border-color: var(--rating-fill-border-dark);
