@@ -186,12 +186,9 @@ h3 {
   border: 1px dashed var(--line);
 }
 
-.ad-unit-slot.compact {
-  min-height: 50px;
-}
-
-.ad-unit-slot.tower {
-  min-height: 300px;
+.ad-unit-slot.banner {
+  width: min(100%, 728px);
+  min-height: 90px;
 }
 
 .hidden {
@@ -1259,9 +1256,6 @@ body.dark .ad-unit-slot {
     flex-wrap: wrap;
   }
 
-  .ad-unit-slot.tower {
-    min-height: 250px;
-  }
 }
 
 @media (min-width: 768px) {
@@ -1287,11 +1281,6 @@ body.dark .ad-unit-slot {
 
   #gps-live-map {
     height: 210px;
-  }
-
-  .ad-units-wrap {
-    grid-template-columns: 1fr 1fr;
-    align-items: start;
   }
 
   .bottom-nav {

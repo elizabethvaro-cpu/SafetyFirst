@@ -68,8 +68,7 @@ const communityRouteNotesInput = document.getElementById("community-route-notes"
 const communityRouteSafetyLevelInput = document.getElementById("community-route-safety-level");
 const communityRouteRatingInput = document.getElementById("community-route-rating");
 const communityRouteTagsInput = document.getElementById("community-route-tags");
-const adUnitCompactContainer = document.getElementById("ad-unit-compact");
-const adUnitTowerContainer = document.getElementById("ad-unit-tower");
+const adUnitBannerContainer = document.getElementById("ad-unit-banner");
 
 const MAP_DEFAULT_CENTER = { lat: 40.7128, lng: -74.006 };
 const MAP_SEARCH_RADIUS_METERS = 1207;
@@ -95,20 +94,12 @@ const ACCENT_COLOR_STORAGE_KEY = "safesteps_accent_color";
 const AD_SCRIPT_HOST = "https://www.highperformanceformat.com";
 const AD_UNIT_CONFIGS = [
   {
-    key: "ac17e1582a3f733061012d2244bff4d0",
+    key: "5809cb37413e7bb221d1e2f17c454669",
     format: "iframe",
-    height: 50,
-    width: 320,
+    height: 90,
+    width: 728,
     params: {},
-    container: adUnitCompactContainer,
-  },
-  {
-    key: "30341936a7d1389b8f994d48acb24c83",
-    format: "iframe",
-    height: 300,
-    width: 160,
-    params: {},
-    container: adUnitTowerContainer,
+    container: adUnitBannerContainer,
   },
 ];
 
