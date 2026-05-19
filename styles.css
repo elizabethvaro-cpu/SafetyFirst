@@ -1129,10 +1129,23 @@ fieldset {
   border-radius: 999px;
   display: grid;
   place-items: center;
-  font-size: 0.58rem;
-  font-weight: 800;
   background: var(--nav-icon-bg);
   color: #475569;
+}
+
+.nav-icon svg {
+  width: 0.96rem;
+  height: 0.96rem;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.nav-icon svg .icon-fill {
+  fill: currentColor;
+  stroke: none;
 }
 
 .nav-item.active {
