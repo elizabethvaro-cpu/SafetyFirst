@@ -402,10 +402,10 @@
                 required
               />
               <div class="profile-actions">
-                <button class="soft-btn" type="button" id="cancel-profile-edit">
+                <button class="soft-btn" type="button" id="cancel-profile-edit" data-i18n="cancelCta">
                   Cancel
                 </button>
-                <button class="primary-btn" type="submit" id="save-profile-btn">
+                <button class="primary-btn" type="submit" id="save-profile-btn" data-i18n="saveNameCta">
                   Save Name
                 </button>
               </div>
@@ -413,9 +413,9 @@
           </section>
 
           <section class="card form-card">
-            <h2>Simple Profile (Supabase Test)</h2>
+            <h2 data-i18n="simpleProfileTestTitle">Simple Profile (Supabase Test)</h2>
             <form id="simple-profile-form" class="stack">
-              <label for="simple-profile-name">Name</label>
+              <label for="simple-profile-name" data-i18n="simpleProfileNameLabel">Name</label>
               <input
                 id="simple-profile-name"
                 type="text"
@@ -423,7 +423,7 @@
                 data-i18n-placeholder="simpleProfileNamePlaceholder"
                 required
               />
-              <label for="simple-profile-email">Email</label>
+              <label for="simple-profile-email" data-i18n="simpleProfileEmailLabel">Email</label>
               <input
                 id="simple-profile-email"
                 type="email"
@@ -431,7 +431,7 @@
                 data-i18n-placeholder="simpleProfileEmailPlaceholder"
                 required
               />
-              <button class="primary-btn" type="submit">Save Profile</button>
+              <button class="primary-btn" type="submit" data-i18n="saveSimpleProfileCta">Save Profile</button>
             </form>
             <div id="simple-profiles-list" class="stack"></div>
           </section>

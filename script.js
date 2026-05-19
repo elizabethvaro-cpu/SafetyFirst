@@ -352,6 +352,12 @@ const copy = {
     editProfile: "Edit profile",
     profileEditorTitle: "Edit Profile",
     displayNameLabel: "Display name",
+    cancelCta: "Cancel",
+    saveNameCta: "Save Name",
+    simpleProfileTestTitle: "Simple Profile (Supabase Test)",
+    simpleProfileNameLabel: "Name",
+    simpleProfileEmailLabel: "Email",
+    saveSimpleProfileCta: "Save Profile",
     appearance: "Appearance",
     lightMode: "Light Mode",
     darkMode: "Dark Mode",
@@ -390,9 +396,11 @@ const copy = {
     routeDeleted: "Route deleted.",
     routeUpdated: "Route updated.",
     profileSaved: "Profile name updated.",
+    simpleProfileSaved: "Profile saved.",
     profileNameRequired: "Please enter a display name.",
     profileSchemaMissing:
       "Profile table is missing. Run the latest SQL schema in Supabase.",
+    noProfilesSavedYet: "No profiles saved yet.",
     reportLocationPlaceholder: "Street / Area",
     reportDetailsPlaceholder: "Tell us what happened...",
     contactNamePlaceholder: "Contact name",
@@ -475,6 +483,12 @@ const copy = {
     editProfile: "Editar perfil",
     profileEditorTitle: "Editar perfil",
     displayNameLabel: "Nombre visible",
+    cancelCta: "Cancelar",
+    saveNameCta: "Guardar nombre",
+    simpleProfileTestTitle: "Perfil simple (prueba de Supabase)",
+    simpleProfileNameLabel: "Nombre",
+    simpleProfileEmailLabel: "Correo",
+    saveSimpleProfileCta: "Guardar perfil",
     appearance: "Apariencia",
     lightMode: "Modo claro",
     darkMode: "Modo oscuro",
@@ -513,9 +527,11 @@ const copy = {
     routeDeleted: "Ruta eliminada.",
     routeUpdated: "Ruta actualizada.",
     profileSaved: "Nombre de perfil actualizado.",
+    simpleProfileSaved: "Perfil guardado.",
     profileNameRequired: "Ingresa un nombre visible.",
     profileSchemaMissing:
       "Falta la tabla de perfil. Ejecuta el SQL mas reciente en Supabase.",
+    noProfilesSavedYet: "Aun no hay perfiles guardados.",
     reportLocationPlaceholder: "Calle / Zona",
     reportDetailsPlaceholder: "Cuentanos que paso...",
     contactNamePlaceholder: "Nombre del contacto",
@@ -598,6 +614,12 @@ const copy = {
     editProfile: "Modifier profil",
     profileEditorTitle: "Modifier le profil",
     displayNameLabel: "Nom affiche",
+    cancelCta: "Annuler",
+    saveNameCta: "Enregistrer le nom",
+    simpleProfileTestTitle: "Profil simple (test Supabase)",
+    simpleProfileNameLabel: "Nom",
+    simpleProfileEmailLabel: "E-mail",
+    saveSimpleProfileCta: "Enregistrer le profil",
     appearance: "Apparence",
     lightMode: "Mode clair",
     darkMode: "Mode sombre",
@@ -636,9 +658,11 @@ const copy = {
     routeDeleted: "Itineraire supprime.",
     routeUpdated: "Itineraire mis a jour.",
     profileSaved: "Nom du profil mis a jour.",
+    simpleProfileSaved: "Profil enregistre.",
     profileNameRequired: "Veuillez saisir un nom affiche.",
     profileSchemaMissing:
       "La table de profil est absente. Executez le SQL le plus recent dans Supabase.",
+    noProfilesSavedYet: "Aucun profil enregistre pour le moment.",
     reportLocationPlaceholder: "Rue / Quartier",
     reportDetailsPlaceholder: "Decrivez ce qui s'est passe...",
     contactNamePlaceholder: "Nom du contact",
@@ -3300,7 +3324,7 @@ async function subscribeGpsRealtime() {
 function renderSimpleProfiles() {
   if (!simpleProfilesList) return;
   if (!state.simpleProfiles.length) {
-    simpleProfilesList.innerHTML = `<div class="empty-state">No profiles saved yet.</div>`;
+    simpleProfilesList.innerHTML = `<div class="empty-state">${text("noProfilesSavedYet")}</div>`;
     return;
   }
 
@@ -4155,7 +4179,7 @@ if (simpleProfileForm) {
 
     simpleProfileForm.reset();
     await fetchSimpleProfiles();
-    showToast("Profile saved.");
+    showToast(text("simpleProfileSaved"));
   });
 }
 
