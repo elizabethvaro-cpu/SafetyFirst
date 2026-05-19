@@ -91,6 +91,9 @@ const GPS_REVERSE_GEOCODE_TIMEOUT_MS = 3500;
 const GPS_FORWARD_GEOCODE_URL = "https://nominatim.openstreetmap.org/search";
 const GPS_FORWARD_GEOCODE_TIMEOUT_MS = 4500;
 const ACCENT_COLOR_STORAGE_KEY = "safesteps_accent_color";
+const INCIDENT_COORDINATE_CACHE_KEY = "safesteps_incident_coordinate_cache_v1";
+const INCIDENT_COORDINATE_CACHE_LOOKUP_LIMIT = 20;
+const INCIDENT_COORDINATE_CACHE_MAX_ENTRIES = 1000;
 const AD_SCRIPT_HOST = "https://www.highperformanceformat.com";
 const AD_UNIT_CONFIGS = [
   {
@@ -244,6 +247,7 @@ const state = {
       type: "all",
       severity: "all",
     },
+    incidentCoordinateCache: null,
     refreshTimeout: null,
   },
   gps: {
@@ -1254,6 +1258,137 @@ function normalizeIncident(record) {
   return normalized;
 }
 
+function normalizeLocationCacheKey(locationText) {
+  return String(locationText || "")
+    .trim()
+    .toLowerCase();
+}
+
+function normalizeCoordinatePair(value) {
+  const lat = Number(value?.lat);
+  const lng = Number(value?.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  if (Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
+  return {
+    lat: Number(lat.toFixed(6)),
+    lng: Number(lng.toFixed(6)),
+  };
+}
+
+function getIncidentCoordinateCache() {
+  if (state.map.incidentCoordinateCache) {
+    return state.map.incidentCoordinateCache;
+  }
+  const fallback = { byIncident: {}, byLocation: {} };
+  try {
+    const raw = window.localStorage.getItem(INCIDENT_COORDINATE_CACHE_KEY);
+    if (!raw) {
+      state.map.incidentCoordinateCache = fallback;
+      return fallback;
+    }
+    const parsed = JSON.parse(raw);
+    const cache = {
+      byIncident: {},
+      byLocation: {},
+    };
+    if (parsed?.byIncident && typeof parsed.byIncident === "object") {
+      Object.entries(parsed.byIncident).forEach(([incidentId, coords]) => {
+        const normalized = normalizeCoordinatePair(coords);
+        if (!normalized || !incidentId) return;
+        cache.byIncident[String(incidentId)] = normalized;
+      });
+    }
+    if (parsed?.byLocation && typeof parsed.byLocation === "object") {
+      Object.entries(parsed.byLocation).forEach(([locationKey, coords]) => {
+        const normalized = normalizeCoordinatePair(coords);
+        if (!normalized || !locationKey) return;
+        cache.byLocation[String(locationKey)] = normalized;
+      });
+    }
+    state.map.incidentCoordinateCache = cache;
+    return cache;
+  } catch {
+    state.map.incidentCoordinateCache = fallback;
+    return fallback;
+  }
+}
+
+function persistIncidentCoordinateCache() {
+  try {
+    const cache = getIncidentCoordinateCache();
+    const trimEntries = (entries) => {
+      if (entries.length <= INCIDENT_COORDINATE_CACHE_MAX_ENTRIES) {
+        return entries;
+      }
+      return entries.slice(entries.length - INCIDENT_COORDINATE_CACHE_MAX_ENTRIES);
+    };
+    cache.byIncident = Object.fromEntries(trimEntries(Object.entries(cache.byIncident)));
+    cache.byLocation = Object.fromEntries(trimEntries(Object.entries(cache.byLocation)));
+    window.localStorage.setItem(INCIDENT_COORDINATE_CACHE_KEY, JSON.stringify(cache));
+  } catch {
+    // Ignore cache persistence failures (private mode / quota / disabled storage).
+  }
+}
+
+function getCachedIncidentCoordinate(incident) {
+  const cache = getIncidentCoordinateCache();
+  const byId = normalizeCoordinatePair(cache.byIncident[incident?.id]);
+  if (byId) return byId;
+  const locationKey = normalizeLocationCacheKey(incident?.location_text);
+  if (!locationKey) return null;
+  return normalizeCoordinatePair(cache.byLocation[locationKey]);
+}
+
+function cacheIncidentCoordinate(incident, coords) {
+  const normalized = normalizeCoordinatePair(coords);
+  if (!normalized) return;
+  const cache = getIncidentCoordinateCache();
+  if (incident?.id) {
+    cache.byIncident[String(incident.id)] = normalized;
+  }
+  const locationKey = normalizeLocationCacheKey(incident?.location_text);
+  if (locationKey) {
+    cache.byLocation[locationKey] = normalized;
+  }
+}
+
+async function hydrateIncidentCoordinates(incidents = []) {
+  if (!Array.isArray(incidents) || !incidents.length) return;
+  const pendingByLocation = new Map();
+  incidents.forEach((incident) => {
+    if (!incident || incident.hasExactCoordinates) return;
+    const cached = getCachedIncidentCoordinate(incident);
+    if (cached) {
+      incident.mapLat = cached.lat;
+      incident.mapLng = cached.lng;
+      incident.hasResolvedCoordinates = true;
+      return;
+    }
+    const locationKey = normalizeLocationCacheKey(incident.location_text);
+    if (!locationKey) return;
+    if (!pendingByLocation.has(locationKey)) {
+      pendingByLocation.set(locationKey, []);
+    }
+    pendingByLocation.get(locationKey).push(incident);
+  });
+
+  if (!pendingByLocation.size) return;
+  let lookups = 0;
+  for (const [locationKey, locationIncidents] of pendingByLocation.entries()) {
+    if (lookups >= INCIDENT_COORDINATE_CACHE_LOOKUP_LIMIT) break;
+    const resolved = await fetchLatLngForQuery(locationKey);
+    lookups += 1;
+    if (!resolved) continue;
+    locationIncidents.forEach((incident) => {
+      incident.mapLat = resolved.lat;
+      incident.mapLng = resolved.lng;
+      incident.hasResolvedCoordinates = true;
+      cacheIncidentCoordinate(incident, resolved);
+    });
+  }
+  persistIncidentCoordinateCache();
+}
+
 function toRadians(value) {
   return (value * Math.PI) / 180;
 }
@@ -1642,6 +1777,14 @@ async function resolveGpsPointFromInput(inputValue, fallbackSeed, options = {}) 
     if (geocoded) return geocoded;
   }
   return resolveGpsPoint(textValue || inputValue, fallbackSeed, options);
+}
+
+async function resolveIncidentReportCoordinates(locationText) {
+  const parsedCoordinates = parseGpsCoordinates(locationText);
+  if (parsedCoordinates) return parsedCoordinates;
+  const textValue = String(locationText || "").trim();
+  if (!textValue) return null;
+  return fetchLatLngForQuery(textValue);
 }
 
 function setGpsInputStreetName(latlng, pointType, options = {}) {
@@ -3396,13 +3539,22 @@ function hasMissingCoordinateColumnError(error) {
 async function insertIncidentReport(payload) {
   if (!supabase) return { error: { message: "Database unavailable." } };
   const basePayload = { ...payload };
-  const mapSource = state.map.selectedLatLng || state.map.userLatLng;
+  const resolvedCoordinates =
+    (await resolveIncidentReportCoordinates(basePayload.location_text)) ||
+    state.map.selectedLatLng ||
+    state.map.userLatLng ||
+    null;
+  const mapSource = normalizeCoordinatePair(resolvedCoordinates);
+  if (mapSource) {
+    cacheIncidentCoordinate({ location_text: basePayload.location_text }, mapSource);
+    persistIncidentCoordinateCache();
+  }
   let withCoordinates = { ...basePayload };
   if (state.map.schemaHasCoordinates && mapSource) {
     withCoordinates = {
       ...basePayload,
-      incident_lat: Number(mapSource.lat.toFixed(6)),
-      incident_lng: Number(mapSource.lng.toFixed(6)),
+      incident_lat: mapSource.lat,
+      incident_lng: mapSource.lng,
     };
   }
   let result = await supabase.from("incident_reports").insert(withCoordinates);
@@ -3436,7 +3588,9 @@ async function fetchIncidentFeed() {
     showToast(error.message);
     return;
   }
-  state.incidents = (data || []).map(normalizeIncident);
+  const incidents = (data || []).map(normalizeIncident);
+  await hydrateIncidentCoordinates(incidents);
+  state.incidents = incidents;
   renderIncidentFeed();
   refreshMapDataFromIncidents();
   refreshGpsWithIncidents();

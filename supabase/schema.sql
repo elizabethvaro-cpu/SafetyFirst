@@ -17,6 +17,11 @@ create table if not exists public.incident_reports (
   updated_at timestamptz not null default timezone('utc', now())
 );
 
+-- Ensure incident map coordinates are available for persistent map markers.
+alter table public.incident_reports
+  add column if not exists incident_lat double precision,
+  add column if not exists incident_lng double precision;
+
 create table if not exists public.trusted_contacts (
   id uuid primary key default gen_random_uuid(),
   owner_user_id uuid not null references auth.users(id) on delete cascade,
@@ -69,6 +74,7 @@ create table if not exists public.user_preferences (
 create index if not exists idx_incident_reports_created_at on public.incident_reports(created_at desc);
 create index if not exists idx_incident_reports_status on public.incident_reports(status);
 create index if not exists idx_incident_reports_reporter_user_id on public.incident_reports(reporter_user_id);
+create index if not exists idx_incident_reports_coords on public.incident_reports(incident_lat, incident_lng);
 
 create index if not exists idx_trusted_contacts_owner_user_id on public.trusted_contacts(owner_user_id);
 create index if not exists idx_sos_events_user_id on public.sos_events(user_id);
